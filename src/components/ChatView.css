@@ -88,9 +88,12 @@
   flex-direction: column;
 }
 
-.messages {
+.messages-scroll {
   flex: 1;
   overflow-y: auto;
+}
+
+.messages {
   width: 100%;
   max-width: 720px;
   margin: 0 auto;
@@ -150,7 +153,7 @@
 .skeleton span {
   height: 11px;
   border-radius: 6px;
-  background: linear-gradient(90deg, #2a2a2a 0%, #3a3a3a 40%, #2a2a2a 80%) 0 0 / 300% 100%;
+  background: linear-gradient(90deg, var(--skeleton-a) 0%, var(--skeleton-b) 40%, var(--skeleton-a) 80%) 0 0 / 300% 100%;
   animation: shimmer 1.6s linear infinite;
 }
 
@@ -176,13 +179,14 @@
 }
 
 .composer-dock {
-  padding: 0 24px 20px;
+  position: relative;
+  padding: 0 24px 10px;
 }
 
 /* Composer */
 .composer {
   display: flex;
-  align-items: flex-end;
+  flex-direction: column;
   gap: 6px;
   padding: 7px;
   border: 1px solid var(--border-strong);
@@ -193,6 +197,12 @@
 }
 
 /* ChatGPT keeps the composer unchanged on focus. */
+
+.composer-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
 
 .composer textarea {
   flex: 1;
@@ -226,8 +236,8 @@
   flex-shrink: 0;
   border: none;
   border-radius: 50%;
-  background: #ffffff;
-  color: #000000;
+  background: var(--send-bg);
+  color: var(--send-fg);
   cursor: pointer;
   transition: opacity 0.2s var(--ease), transform 0.15s var(--ease);
 }
@@ -241,7 +251,7 @@
 }
 
 .send-btn:disabled {
-  background: #676767;
-  color: #2f2f2f;
+  background: var(--send-disabled-bg);
+  color: var(--send-disabled-fg);
   cursor: default;
 }

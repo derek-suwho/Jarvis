@@ -4,13 +4,16 @@ import {
   appendMessage,
   createChat,
   filterChats,
-  greeting,
   groupChats,
   renameChat,
   sortByRecent,
   titleFrom,
   togglePin,
   truncateFrom,
+  chatToMarkdown,
+  recentChats,
+  streamChunks,
+  updateMessage,
 } from '../src/lib/chats';
 
 describe('titleFrom', () => {
@@ -118,11 +121,55 @@ describe('groupChats', () => {
   });
 });
 
-describe('greeting', () => {
-  it('follows the time of day', () => {
-    expect(greeting(8)).toBe('Good morning');
-    expect(greeting(13)).toBe('Good afternoon');
-    expect(greeting(22)).toBe('Good evening');
-    expect(greeting(2)).toBe('Good evening');
+describe('recentChats', () => {
+  it('hides temporary, archived and project chats', () => {
+    const base = { title: 't', messages: [], updatedAt: 0 };
+    const chats: Chat[] = [
+      { ...base, id: 'keep' },
+      { ...base, id: 'tmp', temporary: true },
+      { ...base, id: 'arch', archived: true },
+      { ...base, id: 'proj', projectId: 'p' },
+    ];
+    expect(recentChats(chats).map((c) => c.id)).toEqual(['keep']);
+  });
+});
+
+describe('updateMessage', () => {
+  it('patches one message in one chat', () => {
+    const chats: Chat[] = [{ id: 'c', title: 'C', messages: [{ id: 'm', role: 'assistant', content: 'x' }], updatedAt: 0 }];
+    expect(updateMessage(chats, 'c', 'm', { feedback: 'up' })[0].messages[0]).toEqual({
+      id: 'm',
+      role: 'assistant',
+      content: 'x',
+      feedback: 'up',
+    });
+  });
+});
+
+describe('streamChunks', () => {
+  it('rebuilds the original text exactly', () => {
+    const text = 'Hello there,\n\nthis is  a reply.';
+    const chunks = streamChunks(text);
+    expect(chunks.join('')).toBe(text);
+    expect(chunks.length).toBeGreaterThan(1);
+  });
+});
+
+describe('chatToMarkdown', () => {
+  it('labels speakers and lists attachments', () => {
+    const chat: Chat = {
+      id: 'c',
+      title: 'Trip',
+      updatedAt: 0,
+      messages: [
+        { id: '1', role: 'user', content: 'Plan it', attachments: [{ id: 'a', name: 'map.png', size: 1, type: 'image/png' }] },
+        { id: '2', role: 'assistant', content: 'Sure', model: 'Claude' },
+      ],
+    };
+    const md = chatToMarkdown(chat);
+    expect(md).toContain('# Trip');
+    expect(md).toContain('**You:**\n\nPlan it');
+    expect(md).toContain('_Attached: map.png_');
+    expect(md).toContain('**Claude:**\n\nSure');
   });
 });
