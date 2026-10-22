@@ -19,7 +19,9 @@
   display: grid;
   grid-template-columns: 190px 1fr;
   width: min(820px, 100%);
-  max-height: min(600px, 100%);
+  /* Fixed size so switching sections never resizes the dialog; long sections scroll inside. */
+  height: min(560px, 100%);
+  grid-template-rows: minmax(0, 1fr);
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 16px;
@@ -268,6 +270,7 @@
 @media (max-width: 600px) {
   .dialog {
     grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
   }
 
   .dialog-nav {
