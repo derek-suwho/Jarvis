@@ -281,7 +281,7 @@
   padding: 2px 8px;
   border: 1px solid var(--border-strong);
   border-radius: 10px;
-  color: #7ab7ff;
+  color: var(--accent-text);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -318,24 +318,18 @@
 
 /* macOS desktop: top rows are window drag handles; controls inside stay clickable. */
 .mac-titlebar .topbar,
-.mac-titlebar .tab-strip,
-.mac-titlebar .sidebar-header {
+.mac-titlebar .tab-strip {
   -webkit-app-region: drag;
 }
 
 .mac-titlebar .topbar button,
 .mac-titlebar .tab-strip button,
 .mac-titlebar .tab,
-.mac-titlebar .sidebar-header button,
 .mac-titlebar .newtab-menu {
   -webkit-app-region: no-drag;
 }
 
 /* Room for the traffic lights in whichever row is top-left. */
-.mac-titlebar .sidebar-header {
-  padding-top: 40px;
-}
-
 .mac-titlebar .sidebar-closed .main > .topbar,
 .mac-titlebar .sidebar-closed .tab-strip {
   padding-left: 84px;

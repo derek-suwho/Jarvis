@@ -11,7 +11,12 @@ interface ReplyTarget {
   history: Message[];
   append: (msg: Message) => void;
   update: (id: string, content: string) => void;
-  setPending: (pending: boolean) => void;
+  /** Called once when the first text arrives. */
+  onFirstToken?: () => void;
+  /** Called once when the reply finishes, fails, or is stopped. */
+  onSettled: () => void;
+  /** Id for the reply message (lets callers track the streaming message). */
+  replyId?: string;
 }
 
 export async function fetchChatGPTModels(): Promise<ChatGPTModel[]> {
@@ -28,40 +33,48 @@ export function streamChatGPTReply(t: ReplyTarget): () => void {
   const fail = (message: string) =>
     t.append({ id: newId(), role: 'assistant', content: message, model: t.label, error: true });
   if (!bridge) {
-    t.setPending(false);
     fail('ChatGPT is only available in the Jarvis desktop app.');
+    t.onSettled();
     return () => {};
   }
 
   const requestId = newId();
-  const replyId = newId();
+  const replyId = t.replyId ?? newId();
   let text = '';
   let started = false;
+  let settled = false;
+  const settle = () => {
+    if (settled) return false;
+    settled = true;
+    off();
+    t.onSettled();
+    return true;
+  };
   const messages = t.history.filter((m) => !m.error).map(({ role, content }) => ({ role, content }));
 
   const off = bridge.onStreamEvent((id, event) => {
     if (id !== requestId) return;
+    if (settled) return;
     if (event.type === 'delta') {
       text += event.text;
       if (!started) {
         started = true;
-        t.setPending(false);
+        t.onFirstToken?.();
         t.append({ id: replyId, role: 'assistant', content: text, model: t.label });
       } else {
         t.update(replyId, text);
       }
       return;
     }
-    off();
-    t.setPending(false);
-    if (event.type === 'error') fail(event.message);
+    if (settle() && event.type === 'error') fail(event.message);
   });
 
   bridge.stream(requestId, { model: t.model, messages }).catch((err: unknown) => {
-    off();
-    t.setPending(false);
-    fail(err instanceof Error ? err.message : 'Could not reach ChatGPT.');
+    if (settle()) fail(err instanceof Error ? err.message : 'Could not reach ChatGPT.');
   });
 
-  return () => void bridge.abort(requestId);
+  // Stopping keeps whatever text arrived and ignores anything still in flight.
+  return () => {
+    if (settle()) void bridge.abort(requestId);
+  };
 }

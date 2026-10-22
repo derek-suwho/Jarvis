@@ -5,7 +5,7 @@
   display: grid;
   place-items: center;
   padding: 24px;
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--backdrop);
   animation: fade 0.2s var(--ease);
 }
 
@@ -23,7 +23,7 @@
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 16px;
-  background: #2f2f2f;
+  background: var(--dialog-bg);
   box-shadow: var(--shadow);
   outline: none;
   animation: pop 0.25s var(--ease);
@@ -35,7 +35,7 @@
   gap: 2px;
   padding: 16px 10px;
   border-right: 1px solid var(--border);
-  background: #262626;
+  background: var(--dialog-nav-bg);
 }
 
 .dialog-nav h2 {
@@ -110,7 +110,7 @@
   flex-shrink: 0;
   border: 1px solid var(--border-strong);
   border-radius: 9px;
-  background: #212121;
+  background: var(--input-bg);
   color: var(--text-muted);
   font-weight: 600;
 }
@@ -166,7 +166,7 @@
   padding: 0 10px;
   border: 1px solid var(--border-strong);
   border-radius: 8px;
-  background: #212121;
+  background: var(--input-bg);
   cursor: pointer;
   outline: none;
 }
@@ -208,8 +208,8 @@
 }
 
 .text-btn.danger:hover {
-  background: rgba(239, 68, 68, 0.12);
-  color: #f28b82;
+  background: var(--danger-tint);
+  color: var(--danger);
 }
 
 .dialog-footnote {
@@ -254,6 +254,17 @@
   }
 
   .dialog-nav {
+    flex-direction: row;
+    overflow-x: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .dialog-nav h2 {
     display: none;
+  }
+
+  .dialog-nav-item {
+    white-space: nowrap;
   }
 }

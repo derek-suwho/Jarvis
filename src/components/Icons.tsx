@@ -157,3 +157,99 @@ export const PanelRightIcon = () => (
     <path d="M15 4v16" />
   </Svg>
 );
+
+export const CopyIcon = () => (
+  <Svg size={16}>
+    <rect x="9" y="9" width="12" height="12" rx="2" />
+    <path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" />
+  </Svg>
+);
+
+export const PencilIcon = () => (
+  <Svg size={16}>
+    <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+  </Svg>
+);
+
+export const ThumbUpIcon = () => (
+  <Svg size={16}>
+    <path d="M7 10v11H4a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1h3Zm0 0 4-7a2 2 0 0 1 3 2l-1 5h6a2 2 0 0 1 2 2.3l-1.3 7A2 2 0 0 1 17.7 21H7" />
+  </Svg>
+);
+
+export const ThumbDownIcon = () => (
+  <Svg size={16}>
+    <path d="M17 14V3h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-3Zm0 0-4 7a2 2 0 0 1-3-2l1-5H5a2 2 0 0 1-2-2.3l1.3-7A2 2 0 0 1 6.3 3H17" />
+  </Svg>
+);
+
+export const SpeakerIcon = () => (
+  <Svg size={16}>
+    <path d="M11 5 6 9H3v6h3l5 4V5Z" />
+    <path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13" />
+  </Svg>
+);
+
+export const StopIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+    <rect x="5" y="5" width="14" height="14" rx="2.5" fill="currentColor" />
+  </svg>
+);
+
+export const MicIcon = () => (
+  <Svg>
+    <rect x="9" y="3" width="6" height="12" rx="3" />
+    <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
+  </Svg>
+);
+
+export const PaperclipIcon = () => (
+  <Svg size={16}>
+    <path d="m21 11-8.6 8.6a5 5 0 0 1-7-7L14 4a3.5 3.5 0 0 1 5 5l-8.6 8.6a2 2 0 0 1-2.8-2.8L15.5 7" />
+  </Svg>
+);
+
+export const DotsIcon = () => (
+  <Svg size={16}>
+    <circle cx="5" cy="12" r="1" />
+    <circle cx="12" cy="12" r="1" />
+    <circle cx="19" cy="12" r="1" />
+  </Svg>
+);
+
+export const PinIcon = () => (
+  <Svg size={16}>
+    <path d="M12 17v5M9 3h6l-1 6 4 4v2H6v-2l4-4-1-6Z" />
+  </Svg>
+);
+
+export const ArchiveIcon = () => (
+  <Svg size={16}>
+    <rect x="3" y="4" width="18" height="5" rx="1" />
+    <path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9M10 13h4" />
+  </Svg>
+);
+
+export const DownloadIcon = () => (
+  <Svg size={16}>
+    <path d="M12 3v12M7 10l5 5 5-5M5 21h14" />
+  </Svg>
+);
+
+export const FolderIcon = () => (
+  <Svg size={16}>
+    <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" />
+  </Svg>
+);
+
+export const ArrowDownIcon = () => (
+  <Svg size={16}>
+    <path d="M12 5v14M5 12l7 7 7-7" />
+  </Svg>
+);
+
+export const TemporaryIcon = () => (
+  <Svg>
+    <path d="M21 12a8 8 0 0 1-11.8 7L4 20l1.1-4.6A8 8 0 1 1 21 12Z" strokeDasharray="3 3" />
+  </Svg>
+);

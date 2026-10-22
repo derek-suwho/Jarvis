@@ -1,23 +1,47 @@
 import { useEffect, useRef, useState } from 'react';
 import { ChatGPTConnectBanner, ChatGPTPlanNote, ChatGPTWelcome } from './components/ChatGPTAccount';
+import { ChatMenu } from './components/ChatMenu';
 import { ChatView } from './components/ChatView';
-import { ComposeIcon, PanelRightIcon, SidebarIcon } from './components/Icons';
+import './components/Dialogs.css';
+import { ComposeIcon, PanelRightIcon, SidebarIcon, TemporaryIcon } from './components/Icons';
 import { NewTabMenu } from './components/NewTabMenu';
+import { ProjectHome } from './components/ProjectHome';
+import { SearchDialog } from './components/SearchDialog';
+import type { SettingsSection } from './components/SettingsDialog';
 import { SettingsDialog } from './components/SettingsDialog';
 import { Sidebar } from './components/Sidebar';
 import { TabPanel } from './components/TabPanel';
 import './components/TabPanel.css';
-import type { Chat } from './lib/chats';
-import type { Message } from './lib/chats';
-import { appendMessage, createChat, loadChats, mockReply, newId, saveChats, updateMessage } from './lib/chats';
-import { fetchChatGPTModels, streamChatGPTReply } from './lib/chatgptClient';
+import type { Attachment, Chat, Feedback, Message } from './lib/chats';
+import {
+  appendMessage,
+  chatToMarkdown,
+  createChat,
+  loadChats,
+  newId,
+  renameChat,
+  saveChats,
+  togglePin,
+  truncateFrom,
+  updateChat,
+  updateMessage,
+} from './lib/chats';
+import type { DesktopCommand } from './lib/desktop';
+import { fileSlug, isDesktop, isMac, saveTextFile } from './lib/desktop';
 import type { ModelSettings } from './lib/models';
 import { AUTO_MODEL_ID, DEFAULT_SETTINGS, findModel, getCatalog, modelLabel, setLiveOpenAIModels } from './lib/models';
+import { fetchChatGPTModels, streamChatGPTReply } from './lib/chatgptClient';
+import type { Preferences } from './lib/preferences';
+import { greeting, loadPreferences, savePreferences } from './lib/preferences';
+import type { Project } from './lib/projects';
+import { createProject, loadProjects, saveProjects, updateProject } from './lib/projects';
 import type { Subscriptions } from './lib/subscriptions';
 import { loadSubscriptions, saveSubscriptions } from './lib/subscriptions';
 import type { BrowserState, Tab } from './lib/tabs';
 import { createBrowserTab, createSideChat, mockSideReply, updateSideChat } from './lib/tabs';
 import { useChatGPT } from './lib/useChatGPT';
+import type { LiveReply } from './useReplyStream';
+import { useReplyStream } from './useReplyStream';
 
 const REPLY_DELAY_MS = 700;
 
@@ -27,15 +51,34 @@ const SUGGESTIONS = [
   'Explain how prompt caching changes API costs',
 ];
 
+function useResolvedTheme(theme: Preferences['theme']) {
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+    const apply = () => {
+      document.documentElement.dataset.theme = theme === 'system' ? (media.matches ? 'dark' : 'light') : theme;
+    };
+    apply();
+    window.jarvis?.setTheme(theme);
+    media.addEventListener('change', apply);
+    return () => media.removeEventListener('change', apply);
+  }, [theme]);
+}
+
 export function App() {
   const [chats, setChats] = useState<Chat[]>(loadChats);
+  const [projects, setProjects] = useState<Project[]>(loadProjects);
+  const [prefs, setPrefs] = useState<Preferences>(loadPreferences);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [pendingId, setPendingId] = useState<string | null>(null);
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const [temporary, setTemporary] = useState(false);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
   const [model, setModel] = useState<ModelSettings>(DEFAULT_SETTINGS);
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [settings, setSettings] = useState<SettingsSection | null>(null);
   const [subscriptions, setSubscriptions] = useState<Subscriptions>(loadSubscriptions);
   const chatgpt = useChatGPT();
+  const { streaming, start: startReply, stop } = useReplyStream(setChats);
 
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
@@ -44,10 +87,19 @@ export function App() {
   const [sidePendingId, setSidePendingId] = useState<string | null>(null);
 
   useEffect(() => saveChats(chats), [chats]);
+  useEffect(() => saveProjects(projects), [projects]);
+  useEffect(() => savePreferences(prefs), [prefs]);
   useEffect(() => saveSubscriptions(subscriptions), [subscriptions]);
+  useResolvedTheme(prefs.theme);
+  useEffect(() => {
+    document.documentElement.classList.toggle('desktop-mac', isDesktop() && isMac());
+  }, []);
 
   const activeChat = chats.find((c) => c.id === activeId) ?? null;
   const panelOpen = tabs.length > 0 && panelVisible;
+  const activeProject = projects.find((p) => p.id === (activeChat?.projectId ?? activeProjectId)) ?? null;
+  const pending = !!streaming && streaming.chatId === activeId;
+
   const chatgptConnected = chatgpt.state.phase === 'connected';
 
   // When signed in, the OpenAI group lists the account's real models instead of placeholders.
@@ -83,47 +135,68 @@ export function App() {
     return findModel(model.modelId)?.group === 'OpenAI' ? model.modelId : null;
   };
   const usingChatGPTPlan = chatgptSlug() !== null;
+  /** Real ChatGPT reply config for a conversation, or undefined to use the placeholder stream. */
+  const live = (history: Message[]): LiveReply | undefined => {
+    const slug = chatgptSlug();
+    return slug ? { slug, history } : undefined;
+  };
   const label = () => {
     const { name, detail } = modelLabel(model);
     return `${name} ${detail}`.trim();
   };
 
+  /** Switches view; temporary chats are discarded once you leave them, as in ChatGPT. */
+  const navigate = (chatId: string | null, projectId: string | null = null) => {
+    if (streaming && streaming.chatId !== chatId) stop();
+    setChats((cs) => cs.filter((c) => !c.temporary || c.id === chatId));
+    setActiveId(chatId);
+    setActiveProjectId(projectId);
+    if (chatId) setTemporary(false);
+  };
+
   // A chat is only created on first send, so "New chat" never leaves empty entries in history.
-  const send = (text: string) => {
+  const send = (text: string, attachments: Attachment[]) => {
     let id = activeId;
     if (!id) {
-      const chat = createChat();
+      const chat = createChat(Date.now(), {
+        ...(activeProjectId ? { projectId: activeProjectId } : {}),
+        ...(temporary ? { temporary: true } : {}),
+      });
       id = chat.id;
       setChats((cs) => [chat, ...cs]);
       setActiveId(id);
     }
-    const chatId = id;
-    const userMsg: Message = { id: newId(), role: 'user', content: text };
-    const history = [...(activeChat?.messages ?? []), userMsg];
-    setChats((cs) => appendMessage(cs, chatId, userMsg));
-    setPendingId(chatId);
-    const model = label();
-    const slug = chatgptSlug();
-    if (slug) {
-      streamChatGPTReply({
-        model: slug,
-        label: model,
-        history,
-        append: (msg) => setChats((cs) => appendMessage(cs, chatId, msg)),
-        update: (msgId, content) => setChats((cs) => updateMessage(cs, chatId, msgId, content)),
-        setPending: (p) => setPendingId((cur) => (p ? chatId : cur === chatId ? null : cur)),
-      });
-      return;
-    }
-    setTimeout(() => {
-      setChats((cs) =>
-        appendMessage(cs, chatId, { id: newId(), role: 'assistant', content: mockReply(text, model), model }),
-      );
-      setPendingId(null);
-    }, REPLY_DELAY_MS);
+    const msg: Message = { id: newId(), role: 'user', content: text, ...(attachments.length ? { attachments } : {}) };
+    setChats((cs) => appendMessage(cs, id, msg));
+    startReply(id, text, label(), attachments, live([...(activeChat?.messages ?? []), msg]));
   };
 
+  const editMessage = (messageId: string, text: string) => {
+    if (!activeChat) return;
+    const original = activeChat.messages.find((m) => m.id === messageId);
+    const chatId = activeChat.id;
+    const edited: Message = { ...original!, id: newId(), content: text };
+    const before = activeChat.messages.slice(0, activeChat.messages.findIndex((m) => m.id === messageId));
+    setChats((cs) => appendMessage(truncateFrom(cs, chatId, messageId), chatId, edited));
+    startReply(chatId, text, label(), original?.attachments, live([...before, edited]));
+  };
+
+  const regenerate = (messageId: string) => {
+    if (!activeChat) return;
+    const i = activeChat.messages.findIndex((m) => m.id === messageId);
+    const prompt = activeChat.messages
+      .slice(0, i)
+      .reverse()
+      .find((m) => m.role === 'user');
+    setChats((cs) => truncateFrom(cs, activeChat.id, messageId));
+    startReply(activeChat.id, prompt?.content ?? '', label(), prompt?.attachments, live(activeChat.messages.slice(0, i)));
+  };
+
+  const setFeedback = (messageId: string, feedback: Feedback | undefined) =>
+    activeId && setChats((cs) => updateMessage(cs, activeId, messageId, { feedback }));
+
   const deleteChat = (id: string) => {
+    if (streaming?.chatId === id) stop();
     setChats((cs) => cs.filter((c) => c.id !== id));
     if (id === activeId) setActiveId(null);
   };
@@ -139,6 +212,32 @@ export function App() {
       collapsedForPanel.current = false;
       setSidebarOpen(true);
     }
+  };
+
+  const exportChat = (id: string) => {
+    const chat = chats.find((c) => c.id === id);
+    if (chat) void saveTextFile(`${fileSlug(chat.title)}.md`, chatToMarkdown(chat), 'text/markdown');
+  };
+
+  const chatActions = {
+    onRename: (id: string) => {
+      setSidebarOpen(true);
+      setRenamingId(id);
+    },
+    onTogglePin: (id: string) => setChats((cs) => togglePin(cs, id)),
+    onArchive: (id: string) => {
+      setChats((cs) => updateChat(cs, id, { archived: true }));
+      if (id === activeId) navigate(null);
+    },
+    onDelete: deleteChat,
+    onExport: exportChat,
+    onMove: (id: string, projectId: string | undefined) => setChats((cs) => updateChat(cs, id, { projectId })),
+  };
+
+  const deleteProject = (id: string) => {
+    setProjects((ps) => ps.filter((p) => p.id !== id));
+    setChats((cs) => cs.map((c) => (c.projectId === id ? { ...c, projectId: undefined } : c)));
+    navigate(null);
   };
 
   const openTab = (tab: Tab, full: boolean) => {
@@ -187,15 +286,17 @@ export function App() {
         model: slug,
         label: model,
         history,
-        append: (msg) => setTabs((ts) => updateSideChat(ts, tabId, (s) => ({ ...s, messages: [...s.messages, msg] }))),
-        update: (msgId, content) =>
+        append: (msg: Message) =>
+          setTabs((ts) => updateSideChat(ts, tabId, (s) => ({ ...s, messages: [...s.messages, msg] }))),
+        update: (msgId: string, content: string) =>
           setTabs((ts) =>
             updateSideChat(ts, tabId, (s) => ({
               ...s,
               messages: s.messages.map((m) => (m.id === msgId ? { ...m, content } : m)),
             })),
           ),
-        setPending: (p) => setSidePendingId((cur) => (p ? tabId : cur === tabId ? null : cur)),
+        onFirstToken: () => setSidePendingId((cur) => (cur === tabId ? null : cur)),
+        onSettled: () => setSidePendingId((cur) => (cur === tabId ? null : cur)),
       });
       return;
     }
@@ -210,9 +311,16 @@ export function App() {
     }, REPLY_DELAY_MS);
   };
 
+  const runCommand = (c: DesktopCommand) => {
+    if (c === 'new-chat') navigate(null);
+    else if (c === 'search') setSearchOpen(true);
+    else if (c === 'settings') setSettings('General');
+    else setSidebarOpen((o) => !o);
+  };
+
   // Keyboard shortcuts read the latest handlers through a ref so the listener is registered once.
-  const shortcuts = useRef({ openTab, openSideChat });
-  shortcuts.current = { openTab, openSideChat };
+  const shortcuts = useRef({ openTab, openSideChat, runCommand });
+  shortcuts.current = { openTab, openSideChat, runCommand };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey)) return;
@@ -220,19 +328,26 @@ export function App() {
       if (e.shiftKey && !e.altKey && e.code === 'KeyB') s.openTab(createBrowserTab(), false);
       else if (e.shiftKey && !e.altKey && e.code === 'KeyF') s.openTab(createBrowserTab(), true);
       else if (e.altKey && !e.shiftKey && e.code === 'KeyS') s.openSideChat();
-      else if (!e.shiftKey && !e.altKey && e.key === ',') setSettingsOpen(true);
+      else if (e.shiftKey && !e.altKey && e.code === 'KeyO') s.runCommand('new-chat');
+      else if (e.shiftKey && !e.altKey && e.code === 'KeyS') s.runCommand('toggle-sidebar');
+      else if (!e.shiftKey && !e.altKey && e.code === 'KeyK') s.runCommand('search');
+      else if (!e.shiftKey && !e.altKey && e.key === ',') s.runCommand('settings');
       else return;
       e.preventDefault();
     };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    const off = window.jarvis?.onCommand((c) => shortcuts.current.runCommand(c));
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      off?.();
+    };
   }, []);
 
   const leading = !sidebarOpen && (
     <>
       <button
         className="icon-btn"
-        title="Open sidebar"
+        title="Open sidebar (⇧⌘S)"
         onClick={() => {
           collapsedForPanel.current = false;
           setSidebarOpen(true);
@@ -240,7 +355,7 @@ export function App() {
       >
         <SidebarIcon />
       </button>
-      <button className="icon-btn" title="New chat" onClick={() => setActiveId(null)}>
+      <button className="icon-btn" title="New chat (⇧⌘O)" onClick={() => navigate(null)}>
         <ComposeIcon />
       </button>
     </>
@@ -250,8 +365,26 @@ export function App() {
   const chatBar = (
     <>
       {!panelOpen && leading}
-      <span className="topbar-title">{activeChat?.title ?? 'New chat'}</span>
+      {activeProject && (
+        <button className="crumb" onClick={() => navigate(null, activeProject.id)}>
+          {activeProject.name}
+          {activeChat && <span className="crumb-sep">/</span>}
+        </button>
+      )}
+      <span className="topbar-title">{activeChat?.title ?? ''}</span>
+      {activeChat?.temporary && <span className="temp-pill">Temporary</span>}
       <div className="spacer" />
+      {activeChat && !activeChat.temporary && <ChatMenu chat={activeChat} projects={projects} variant="topbar" {...chatActions} />}
+      {!activeChat && !activeProjectId && (
+        <button
+          className={`icon-btn${temporary ? ' pressed' : ''}`}
+          title={temporary ? 'Turn off temporary chat' : 'Temporary chat — not saved to history'}
+          aria-pressed={temporary}
+          onClick={() => setTemporary((t) => !t)}
+        >
+          <TemporaryIcon />
+        </button>
+      )}
       <NewTabMenu
         onNewTab={() => openTab(createBrowserTab(), false)}
         onNewTabFull={() => openTab(createBrowserTab(), true)}
@@ -269,25 +402,47 @@ export function App() {
     </>
   );
 
+  const emptyCopy = temporary
+    ? { eyebrow: 'Temporary chat', title: 'Temporary Chat', placeholder: 'Ask anything — this chat won’t be saved' }
+    : activeProject
+      ? { eyebrow: 'Project', title: activeProject.name, placeholder: `New chat in ${activeProject.name}` }
+      : { eyebrow: 'New conversation', title: greeting(prefs.name), placeholder: undefined };
+
   return (
     <div className={`app${sidebarOpen ? '' : ' sidebar-closed'}`}>
       {sidebarOpen && (
         <Sidebar
           chats={chats}
+          projects={projects}
           activeId={activeId}
-          onNewChat={() => setActiveId(null)}
-          onSelect={setActiveId}
-          onDelete={deleteChat}
+          activeProjectId={activeId ? null : activeProjectId}
+          renamingId={renamingId}
+          userName={prefs.name}
+          subscriptionCount={Object.keys(subscriptions).length}
+          onNewChat={() => navigate(null)}
+          onSelect={(id) => navigate(id)}
+          onSelectProject={(id) => navigate(null, id)}
+          onCreateProject={(name) => {
+            const p = createProject(name);
+            if (!p) return;
+            setProjects((ps) => [...ps, p]);
+            navigate(null, p.id);
+          }}
+          onRenameDone={(id, title) => {
+            setRenamingId(null);
+            if (title !== null) setChats((cs) => renameChat(cs, id, title));
+          }}
+          onSearch={() => setSearchOpen(true)}
           onCollapse={() => {
             collapsedForPanel.current = false;
             setSidebarOpen(false);
           }}
-          onOpenSettings={() => setSettingsOpen(true)}
-          subscriptionCount={Object.keys(subscriptions).length}
+          onOpenSettings={() => setSettings('General')}
+          {...chatActions}
         />
       )}
       <main className="main">
-        {!panelOpen && <header className="topbar">{chatBar}</header>}
+        {!panelOpen && <header className="topbar drag-region">{chatBar}</header>}
         <div className={`workspace${panelOpen ? ' split' : ''}`}>
           {panelOpen && (
             <TabPanel
@@ -312,23 +467,67 @@ export function App() {
               {panelOpen && <header className="topbar">{chatBar}</header>}
               <ChatView
                 chat={activeChat}
-                pending={pendingId !== null && pendingId === activeId}
+                pending={pending}
+                streamingId={pending ? streaming?.messageId : null}
                 model={model}
                 onModelChange={setModel}
                 onSend={send}
-                suggestions={SUGGESTIONS}
-                banner={<ChatGPTConnectBanner account={chatgpt} />}
+                onStop={stop}
+                onEdit={editMessage}
+                onRegenerate={regenerate}
+                onFeedback={setFeedback}
+                eyebrow={emptyCopy.eyebrow}
+                emptyTitle={emptyCopy.title}
+                placeholder={emptyCopy.placeholder}
+                suggestions={temporary || activeProject ? undefined : SUGGESTIONS}
+                disclaimer
+                emptyFooter={
+                  temporary ? (
+                    <p className="settings-hint temp-note">
+                      This chat won’t appear in history or be used for memory. It’s discarded when you leave it.
+                    </p>
+                  ) : activeProject && !activeChat ? (
+                    <ProjectHome
+                      project={activeProject}
+                      chats={chats}
+                      onSelect={(id) => navigate(id)}
+                      onChange={(patch) => setProjects((ps) => updateProject(ps, activeProject.id, patch))}
+                      onDelete={() => deleteProject(activeProject.id)}
+                    />
+                  ) : undefined
+                }
+                banner={temporary || activeProject ? undefined : <ChatGPTConnectBanner account={chatgpt} />}
                 composerNote={usingChatGPTPlan && <ChatGPTPlanNote />}
               />
             </div>
           )}
         </div>
       </main>
-      {settingsOpen && (
+      {searchOpen && (
+        <SearchDialog chats={chats} onSelect={(id) => navigate(id)} onNewChat={() => navigate(null)} onClose={() => setSearchOpen(false)} />
+      )}
+      {settings && (
         <SettingsDialog
+          initialSection={settings}
           subscriptions={subscriptions}
           onChange={setSubscriptions}
-          onClose={() => setSettingsOpen(false)}
+          preferences={prefs}
+          onPreferencesChange={setPrefs}
+          chats={chats}
+          onUnarchive={(id) => setChats((cs) => updateChat(cs, id, { archived: false }))}
+          onArchiveAll={() => {
+            setChats((cs) => cs.map((c) => (c.temporary ? c : { ...c, archived: true })));
+            navigate(null);
+          }}
+          onDeleteAll={() => {
+            stop();
+            setChats([]);
+            navigate(null);
+          }}
+          onExportAll={() =>
+            void saveTextFile('jarvis-chats.json', JSON.stringify(chats.filter((c) => !c.temporary), null, 2), 'application/json')
+          }
+          onClose={() => setSettings(null)}
           chatgpt={chatgpt}
         />
       )}

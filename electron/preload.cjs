@@ -20,4 +20,11 @@ contextBridge.exposeInMainWorld('jarvis', {
       return () => ipcRenderer.removeListener('chatgpt:stream-event', handler);
     },
   },
+  saveFile: (name, content) => ipcRenderer.invoke('save-file', name, content),
+  setTheme: (theme) => ipcRenderer.send('set-theme', theme),
+  onCommand: (cb) => {
+    const listener = (_event, command) => cb(command);
+    ipcRenderer.on('menu-command', listener);
+    return () => ipcRenderer.removeListener('menu-command', listener);
+  },
 });
