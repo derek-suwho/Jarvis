@@ -398,6 +398,36 @@ describe('grounded extraction and durable queue', () => {
     expect(memory.jobs()).toHaveLength(1);
     expect(memory.jobs()[0].state).toBe('complete');
   });
+  it.each([
+    ['No, do not use that', 'use that'],
+    ['Yes, use that. Actually, no.', 'use that'],
+    ['I reject the proposal to use that', 'use that'],
+    ['No, do not use SQLite', 'use SQLite'],
+    ["I don't prefer SQLite", 'prefer SQLite'],
+    ['I can’t use SQLite', 'use SQLite'],
+    ['Use SQLite? No, I reject it.', 'Use SQLite'],
+  ])(
+    'rejects evidence stripped from negative user context: %s',
+    async (text, quote) => {
+      const first = turn('Suggest a database');
+      const run = turn(text, null, first.chatId);
+      const memory = createMemoryStore(db),
+        job = memory.enqueue(run)!;
+      const output = update(run, 'SQLite', quote);
+      await expect(
+        extractMemory(
+          memory.extractionInput(job.id)!,
+          jsonAdapter(output),
+          model,
+          new AbortController().signal,
+        ),
+      ).rejects.toThrow(/evidence/i);
+      expect(() => memory.apply(job.id, output)).toThrow(/evidence/i);
+      expect(memory.list()).toEqual([]);
+      expect(memory.getSummary(run.chatId)).toBeNull();
+      expect(memory.getJob(job.id)?.state).toBe('pending');
+    },
+  );
   it('does not treat rejection of a proposal as adoption', async () => {
     const first = turn('Suggest a database'),
       run = turn('Yes, I reject that', null, first.chatId),

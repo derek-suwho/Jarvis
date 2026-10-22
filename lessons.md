@@ -9,3 +9,4 @@
 - Track app pricing separately from model funding. Jarvis is a monthly paid app; customers retain their own provider subscriptions. Founder-owned subscriptions establish available test accounts, not commercial integration eligibility.
 
 - Keep implementation code readable and multiline. Concise conversation and commit instructions do not authorize compressed control flow.
+- Validate evidence polarity against the complete source utterance. Model-selected substrings can strip negation or later rejection; exact quotation alone does not establish affirmative support.

@@ -137,11 +137,21 @@ export function validateUpdate(
       )
         throw new Error('Quoted text is not evidence');
       const value = normalize(candidate.value),
-        quote = normalize(evidence.quote);
+        quote = normalize(evidence.quote),
+        utterance = normalize(message.content);
+      // A model-selected substring can strip "not" or a later rejection.
+      // Reject ambiguous negative context for both literal facts and adoption;
+      // do not infer which clause a negation modifies.
+      if (
+        /\b(?:no|not|never|neither|nor|without|cannot|(?:ca|do|does|did|is|are|was|were|wo|would|should|could)n['’]?t|reject(?:s|ed|ing)?|refus(?:e|es|ed|ing)|declin(?:e|es|ed|ing)|disagree(?:s|d|ing)?|avoid(?:s|ed|ing)?)\b/i.test(
+          utterance,
+        )
+      )
+        throw new Error('Negative user context is not affirmative evidence');
       const adoption =
         /^(?:yes[,.!]?\s*)?(?:agreed|i agree|i accept|let'?s use|use that|go with that|adopt)(?:\b|$)/i.test(
-          quote,
-        ) && !/\b(?:not|never|reject|disagree|don'?t|no)\b/i.test(quote);
+          utterance,
+        );
       const previous = input.snapshot.messages
         .slice(0, index)
         .reverse()
