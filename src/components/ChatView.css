@@ -1,0 +1,247 @@
+/* Empty state: left-aligned block sitting slightly above center. */
+.empty-state {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 24px 24px 10vh;
+}
+
+.empty-inner {
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  animation: rise 0.6s var(--ease);
+}
+
+.eyebrow {
+  margin: 0 0 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.empty-state h1 {
+  margin: 0 0 22px;
+  font-size: 26px;
+  font-weight: 500;
+  letter-spacing: -0.025em;
+  line-height: 1.15;
+}
+
+.suggestions {
+  list-style: none;
+  margin: 18px 0 0;
+  padding: 0;
+  border-top: 1px solid var(--border);
+}
+
+.suggestions li {
+  border-bottom: 1px solid var(--border);
+  animation: rise 0.5s var(--ease) both;
+  animation-delay: calc(150ms + var(--i, 0) * 60ms);
+}
+
+.suggestions button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  padding: 12px 4px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  text-align: left;
+  cursor: pointer;
+  transition: color 0.2s var(--ease), padding 0.3s var(--ease);
+}
+
+.suggestions button:hover {
+  padding-left: 10px;
+  color: var(--text);
+}
+
+.suggestions button svg {
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.2s var(--ease);
+}
+
+.suggestions button:hover svg {
+  opacity: 1;
+}
+
+.composer-wrap {
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.conversation {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 24px 24px 8px;
+}
+
+.message {
+  margin-bottom: 26px;
+  line-height: 1.65;
+  font-size: 15px;
+  animation: rise 0.45s var(--ease);
+}
+
+.message.user {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.message.user .message-body {
+  max-width: 78%;
+  padding: 9px 15px;
+  border-radius: 18px;
+  background: var(--surface-2);
+}
+
+.message-body {
+  max-width: 65ch;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.message-model {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 6px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+
+.message-model::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-dim);
+}
+
+/* Skeleton loader shaped like a short reply. */
+.skeleton {
+  display: grid;
+  gap: 9px;
+  padding-top: 4px;
+}
+
+.skeleton span {
+  height: 11px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, #2a2a2a 0%, #3a3a3a 40%, #2a2a2a 80%) 0 0 / 300% 100%;
+  animation: shimmer 1.6s linear infinite;
+}
+
+.skeleton span:nth-child(1) {
+  width: 82%;
+}
+
+.skeleton span:nth-child(2) {
+  width: 64%;
+}
+
+.skeleton span:nth-child(3) {
+  width: 38%;
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -50% 0;
+  }
+}
+
+.composer-dock {
+  padding: 0 24px 20px;
+}
+
+/* Composer */
+.composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  padding: 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: 22px;
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  transition: border-color 0.25s var(--ease), box-shadow 0.25s var(--ease);
+}
+
+/* ChatGPT keeps the composer unchanged on focus. */
+
+.composer textarea {
+  flex: 1;
+  min-width: 0;
+  min-height: 36px;
+  padding: 8px 4px;
+  border: none;
+  outline: none;
+  resize: none;
+  background: transparent;
+  font-size: 15px;
+  line-height: 20px;
+}
+
+.composer textarea::placeholder {
+  color: var(--text-dim);
+}
+
+.composer-plus {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+}
+
+.send-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 50%;
+  background: #ffffff;
+  color: #000000;
+  cursor: pointer;
+  transition: opacity 0.2s var(--ease), transform 0.15s var(--ease);
+}
+
+.send-btn:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.send-btn:active:not(:disabled) {
+  transform: scale(0.92);
+}
+
+.send-btn:disabled {
+  background: #676767;
+  color: #2f2f2f;
+  cursor: default;
+}
