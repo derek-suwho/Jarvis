@@ -10,6 +10,17 @@ export interface Attachment {
   preview?: string;
 }
 
+/** One tool call made while writing a reply (MCP server tool, skill, or Claude Code built-in). */
+export interface ToolUse {
+  id: string;
+  /** Server or source shown to the user, e.g. "context7" or "Skills". */
+  server: string;
+  tool: string;
+  /** Short argument summary, e.g. the skill being loaded. */
+  detail?: string;
+  status: 'running' | 'done' | 'error';
+}
+
 export interface Message {
   id: string;
   role: Role;
@@ -19,6 +30,8 @@ export interface Message {
   error?: boolean;
   attachments?: Attachment[];
   feedback?: Feedback;
+  /** Tool calls made for this reply, in order. */
+  tools?: ToolUse[];
 }
 
 export interface Chat {

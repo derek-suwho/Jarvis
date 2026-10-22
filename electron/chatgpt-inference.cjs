@@ -118,6 +118,27 @@ async function runCall(catalog, call) {
   }
 }
 
+/** Chat activity event for a tool call; skills show which skill they load. */
+function toolEvent(catalog, call, status) {
+  const tool = catalog.find((t) => t.name === call.name);
+  let detail;
+  if (tool?.server === 'Skills') {
+    try {
+      detail = JSON.parse(call.arguments || '{}').name;
+    } catch {
+      // Unparseable arguments just show no detail.
+    }
+  }
+  return {
+    type: 'tool',
+    id: call.call_id,
+    server: tool?.server ?? 'Tools',
+    tool: tool?.tool ?? call.name,
+    ...(typeof detail === 'string' ? { detail } : {}),
+    status,
+  };
+}
+
 /** Streams one model turn. Returns { text, calls }, or null after emitting a terminal error. */
 async function streamTurn(model, input, toolDefs, emit, signal) {
   const res = await authedFetch('/responses', {
@@ -191,7 +212,11 @@ async function streamResponse(payload, emit, signal, getTools = tools.catalog) {
       for (const call of turn.calls) {
         if (signal?.aborted) throw new Error('Stopped.');
         input.push({ type: 'function_call', ...call });
-        input.push({ type: 'function_call_output', call_id: call.call_id, output: await runCall(catalog, call) });
+        emit(toolEvent(catalog, call, 'running'));
+        const output = await runCall(catalog, call);
+        const failed = !catalog.some((t) => t.name === call.name) || /^(Error:|Tool arguments were not valid JSON)/.test(output);
+        emit(toolEvent(catalog, call, failed ? 'error' : 'done'));
+        input.push({ type: 'function_call_output', call_id: call.call_id, output });
       }
     }
     emit({ type: 'error', message: 'Stopped after too many tool calls in one reply.' });
@@ -220,4 +245,4 @@ function registerIpc(ipcMain) {
   ipcMain.handle('chatgpt:abort', (_event, requestId) => inflight.get(requestId)?.abort());
 }
 
-module.exports = { registerIpc, validateRequest, sseEvents, functionTools, runCall, streamResponse, USAGE_ERRORS };
+module.exports = { registerIpc, validateRequest, sseEvents, functionTools, runCall, toolEvent, streamResponse, USAGE_ERRORS };

@@ -55,7 +55,7 @@ export function useReplyStream(setChats: SetChats) {
         label: model,
         replyId: messageId,
         append: (msg: Message) => setChats((cs) => appendMessage(cs, chatId, msg)),
-        update: (id: string, content: string) => setChats((cs) => updateMessage(cs, chatId, id, { content })),
+        update: (id: string, patch: Partial<Message>) => setChats((cs) => updateMessage(cs, chatId, id, patch)),
         onSettled: () => {
           abortLive.current = null;
           setStreaming((s) => (s?.messageId === messageId ? null : s));

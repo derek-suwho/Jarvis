@@ -115,4 +115,4 @@ function registerIpc(ipcMain) {
   });
 }
 
-module.exports = { registerIpc, catalog: () => init().catalog(), claudeMcpConfigFile };
+module.exports = { registerIpc, catalog: () => init().catalog(), labelTool: (name) => init().labelTool(name), claudeMcpConfigFile };

@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Feedback, Message } from '../lib/chats';
+import type { Feedback, Message, ToolUse } from '../lib/chats';
 import { fileExtension, formatBytes } from '../lib/attachments';
 import { Markdown } from './Markdown';
 import { useCopy } from './useCopy';
-import { CheckIcon, CopyIcon, PencilIcon, ReloadIcon, SpeakerIcon, StopIcon, ThumbDownIcon, ThumbUpIcon } from './Icons';
+import { CheckIcon, CloseIcon, CopyIcon, PencilIcon, ReloadIcon, SpeakerIcon, StopIcon, ThumbDownIcon, ThumbUpIcon } from './Icons';
 
 interface Props {
   message: Message;
@@ -17,6 +17,29 @@ interface Props {
 }
 
 const canSpeak = typeof window !== 'undefined' && 'speechSynthesis' in window;
+
+function toolLabel(t: ToolUse) {
+  if (t.server === 'Skills' && t.detail) {
+    return t.status === 'running' ? `Loading skill ${t.detail}` : t.status === 'error' ? `Skill ${t.detail} failed` : `Loaded skill ${t.detail}`;
+  }
+  const what = `${t.server} › ${t.tool}`;
+  return t.status === 'running' ? `Using ${what}` : t.status === 'error' ? `${what} failed` : `Used ${what}`;
+}
+
+/** Tool calls made while writing the reply, shown above it. */
+function ToolActivity({ tools }: { tools: ToolUse[] }) {
+  return (
+    <ul className="tool-activity">
+      {tools.map((t) => (
+        <li key={t.id} className={t.status}>
+          <span className="tool-mark">{t.status === 'running' ? <span className="tool-spinner" /> : t.status === 'error' ? <CloseIcon /> : <CheckIcon />}</span>
+          <span className="tool-label">{toolLabel(t)}</span>
+          {t.detail && t.server !== 'Skills' && <span className="tool-detail mono">{t.detail}</span>}
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 function Attachments({ message }: { message: Message }) {
   if (!message.attachments?.length) return null;
@@ -139,6 +162,7 @@ export function MessageItem({ message: m, streaming, isLast, busy, onEdit, onReg
   return (
     <div className={`message assistant${m.error ? ' error' : ''}`}>
       {m.model && <div className="message-model">{m.model}</div>}
+      {m.tools && m.tools.length > 0 && <ToolActivity tools={m.tools} />}
       {m.content ? (
         <div className={streaming ? 'streaming' : undefined}>
           <Markdown text={m.content} />

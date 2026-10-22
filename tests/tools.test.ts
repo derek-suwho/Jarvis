@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import claude from '../electron/claude-code.cjs';
 import inference from '../electron/chatgpt-inference.cjs';
 import host from '../electron/tools/host.cjs';
 import skills from '../electron/tools/skills.cjs';
@@ -195,5 +196,42 @@ describe('ChatGPT tool calls', () => {
     expect(await inference.runCall(catalog, { name: 'skills__load_skill', arguments: '{"name":"seo"}' })).toBe('loaded seo');
     expect(await inference.runCall(catalog, { name: 'skills__load_skill', arguments: '{' })).toBe('Tool arguments were not valid JSON.');
     expect(await inference.runCall(catalog, { name: 'missing', arguments: '{}' })).toBe('Unknown tool missing.');
+  });
+});
+
+describe('tool activity events', () => {
+  const catalog = [
+    { name: 'skills__load_skill', server: 'Skills', tool: 'load_skill', description: '', parameters: {}, run: () => '' },
+    { name: 'context7__query', server: 'context7', tool: 'query', description: '', parameters: {}, run: () => '' },
+  ];
+
+  it('labels ChatGPT calls by server and names the skill being loaded', () => {
+    expect(inference.toolEvent(catalog, { call_id: 'c1', name: 'skills__load_skill', arguments: '{"name":"seo"}' }, 'running')).toEqual({
+      type: 'tool',
+      id: 'c1',
+      server: 'Skills',
+      tool: 'load_skill',
+      detail: 'seo',
+      status: 'running',
+    });
+    expect(inference.toolEvent(catalog, { call_id: 'c2', name: 'context7__query', arguments: '{' }, 'done')).toEqual({
+      type: 'tool',
+      id: 'c2',
+      server: 'context7',
+      tool: 'query',
+      status: 'done',
+    });
+  });
+
+  it('reads Claude Code tool starts and results from stream-json', () => {
+    const label = (name: string) => ({ server: name.startsWith('mcp__skills') ? 'Skills' : 'Claude Code', tool: name.split('__').pop() });
+    const start = claude.toolEvents(
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'hi' }, { type: 'tool_use', id: 't1', name: 'mcp__skills__load_skill', input: { name: 'seo' } }] } },
+      label,
+    );
+    expect(start).toEqual([{ type: 'tool', id: 't1', server: 'Skills', tool: 'load_skill', detail: 'seo', status: 'running' }]);
+    const done = claude.toolEvents({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', is_error: true }] } }, label);
+    expect(done).toEqual([{ type: 'tool', id: 't1', server: '', tool: '', status: 'error' }]);
+    expect(claude.toolEvents({ type: 'system' }, label)).toEqual([]);
   });
 });

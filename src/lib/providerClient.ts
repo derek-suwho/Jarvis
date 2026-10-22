@@ -1,4 +1,4 @@
-import type { Message } from './chats';
+import type { Message, ToolUse } from './chats';
 import { newId } from './chats';
 import type { ChatGPTModel, ClaudeStreamPayload, StreamBridge } from './desktop';
 
@@ -10,8 +10,8 @@ interface ReplyTarget {
   /** Conversation so far, oldest first, ending with the new user message. */
   history: Message[];
   append: (msg: Message) => void;
-  update: (id: string, content: string) => void;
-  /** Called once when the first text arrives. */
+  update: (id: string, patch: { content: string; tools?: ToolUse[] }) => void;
+  /** Called once when the first text or tool activity arrives. */
   onFirstToken?: () => void;
   /** Called once when the reply finishes, fails, or is stopped. */
   onSettled: () => void;
@@ -83,12 +83,27 @@ function streamLiveReply<P>(
   const requestId = newId();
   const replyId = t.replyId ?? newId();
   let text = '';
+  let tools: ToolUse[] | undefined;
   let started = false;
   let settled = false;
+  const show = () => {
+    if (!started) {
+      started = true;
+      t.onFirstToken?.();
+      t.append({ id: replyId, role: 'assistant', content: text, model: t.label, ...(tools ? { tools } : {}) });
+    } else {
+      t.update(replyId, { content: text, ...(tools ? { tools } : {}) });
+    }
+  };
   const settle = () => {
     if (settled) return false;
     settled = true;
     off();
+    // A stopped or failed reply leaves no tool spinning.
+    if (tools?.some((x) => x.status === 'running')) {
+      tools = tools.map((x) => (x.status === 'running' ? { ...x, status: 'error' as const } : x));
+      show();
+    }
     t.onSettled();
     return true;
   };
@@ -99,13 +114,18 @@ function streamLiveReply<P>(
     if (settled) return;
     if (event.type === 'delta') {
       text += event.text;
-      if (!started) {
-        started = true;
-        t.onFirstToken?.();
-        t.append({ id: replyId, role: 'assistant', content: text, model: t.label });
-      } else {
-        t.update(replyId, text);
-      }
+      show();
+      return;
+    }
+    if (event.type === 'tool') {
+      const { id: toolId, server, tool, detail, status } = event;
+      const use: ToolUse = { id: toolId, server, tool, ...(detail ? { detail } : {}), status };
+      const list = tools ?? [];
+      // Later events for a call only move its status (and add detail); the first one names it.
+      tools = list.some((x) => x.id === toolId)
+        ? list.map((x) => (x.id === toolId ? { ...x, status, ...(detail ? { detail } : {}) } : x))
+        : [...list, use];
+      show();
       return;
     }
     if (settle() && event.type === 'error') fail(event.message);

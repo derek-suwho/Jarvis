@@ -171,6 +171,27 @@ function buildArgs(req, mcp = null) {
   return { args, prompt, sessionId };
 }
 
+/** Chat activity events for tool calls in one stream-json line: a call starting, or its result coming back. */
+function toolEvents(e, labelTool) {
+  const blocks = Array.isArray(e.message?.content) ? e.message.content : [];
+  if (e.type === 'assistant') {
+    return blocks
+      .filter((b) => b.type === 'tool_use')
+      .map((b) => {
+        const label = labelTool(b.name);
+        const detail = label.server === 'Skills' && typeof b.input?.name === 'string' ? { detail: b.input.name } : {};
+        return { type: 'tool', id: b.id, ...label, ...detail, status: 'running' };
+      });
+  }
+  if (e.type === 'user') {
+    return blocks
+      .filter((b) => b.type === 'tool_result')
+      // Results only carry the call id; the renderer keeps the name from the start event.
+      .map((b) => ({ type: 'tool', id: b.tool_use_id, server: '', tool: '', status: b.is_error ? 'error' : 'done' }));
+  }
+  return [];
+}
+
 async function streamResponse(payload, emit, signal) {
   let req;
   try {
@@ -219,6 +240,14 @@ async function streamResponse(payload, emit, signal) {
       if (e.type === 'stream_event' && e.event?.type === 'content_block_delta' && e.event.delta?.type === 'text_delta') {
         text += e.event.delta.text;
         emit({ type: 'delta', text: e.event.delta.text });
+      } else if (e.type === 'stream_event' && e.event?.type === 'content_block_start' && e.event.content_block?.type === 'text') {
+        // Text after a tool call starts a new paragraph instead of running on from the last one.
+        if (text && !/\n\s*$/.test(text)) {
+          text += '\n\n';
+          emit({ type: 'delta', text: '\n\n' });
+        }
+      } else if (e.type === 'assistant' || e.type === 'user') {
+        for (const event of toolEvents(e, tools.labelTool)) emit(event);
       } else if (e.type === 'result') {
         if (e.is_error || e.subtype !== 'success') {
           sessions.delete(req.conversationId);
@@ -263,4 +292,4 @@ function registerIpc(ipcMain) {
   ipcMain.handle('claude:abort', (_event, requestId) => inflight.get(requestId)?.abort());
 }
 
-module.exports = { registerIpc, validateRequest, buildArgs, recordSession, transcriptPrompt, CHAT_SYSTEM_PROMPT };
+module.exports = { registerIpc, validateRequest, buildArgs, recordSession, transcriptPrompt, toolEvents, CHAT_SYSTEM_PROMPT };

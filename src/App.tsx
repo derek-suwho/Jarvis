@@ -300,11 +300,11 @@ export function App() {
         label: model,
         append: (msg: Message) =>
           setTabs((ts) => updateSideChat(ts, tabId, (s) => ({ ...s, messages: [...s.messages, msg] }))),
-        update: (msgId: string, content: string) =>
+        update: (msgId: string, patch: Partial<Message>) =>
           setTabs((ts) =>
             updateSideChat(ts, tabId, (s) => ({
               ...s,
-              messages: s.messages.map((m) => (m.id === msgId ? { ...m, content } : m)),
+              messages: s.messages.map((m) => (m.id === msgId ? { ...m, ...patch } : m)),
             })),
           ),
         onFirstToken: () => setSidePendingId((cur) => (cur === tabId ? null : cur)),

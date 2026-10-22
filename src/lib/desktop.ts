@@ -9,7 +9,20 @@ export interface ChatGPTModel {
   name: string;
 }
 
-export type ChatGPTStreamEvent = { type: 'delta'; text: string } | { type: 'done' } | { type: 'error'; message: string };
+export type ToolEvent = {
+  type: 'tool';
+  id: string;
+  server: string;
+  tool: string;
+  detail?: string;
+  status: 'running' | 'done' | 'error';
+};
+
+export type ChatGPTStreamEvent =
+  | { type: 'delta'; text: string }
+  | ToolEvent
+  | { type: 'done' }
+  | { type: 'error'; message: string };
 
 export interface ClaudeStatus {
   installed: boolean;

@@ -17,6 +17,7 @@ const CALL_TIMEOUT_MS = 120_000;
 const RETRY_FAILED_MS = 60_000;
 const MAX_RESULT_CHARS = 60_000;
 const SKILLS_KEY = 'skills';
+const SKILLS_LABEL = 'Skills';
 
 function withTimeout(promise, ms, message) {
   let timer;
@@ -145,6 +146,8 @@ function createHost({ store, openExternal, skillsServerPath }) {
       for (const tool of entry.tools) {
         tools.push({
           name: toolName(server.key, tool.name, taken),
+          server: server.name,
+          tool: tool.name,
           description: `[${server.name}] ${tool.description ?? ''}`.slice(0, 1024),
           parameters: tool.inputSchema ?? { type: 'object', properties: {} },
           run: async (args) =>
@@ -155,7 +158,14 @@ function createHost({ store, openExternal, skillsServerPath }) {
       }
     }
     for (const tool of skillTools(store.skills())) {
-      tools.push({ name: toolName(SKILLS_KEY, tool.name, taken), description: tool.description, parameters: tool.inputSchema, run: tool.run });
+      tools.push({
+        name: toolName(SKILLS_KEY, tool.name, taken),
+        server: SKILLS_LABEL,
+        tool: tool.name,
+        description: tool.description,
+        parameters: tool.inputSchema,
+        run: tool.run,
+      });
     }
     return tools;
   }
@@ -221,7 +231,15 @@ function createHost({ store, openExternal, skillsServerPath }) {
     return { mcpServers };
   }
 
-  return { catalog, status, connect, disconnect, signIn, refresh, claudeConfig };
+  /** Display name for a Claude Code tool such as `mcp__github__create_issue`. */
+  function labelTool(name) {
+    const m = /^mcp__(.+?)__(.+)$/.exec(name);
+    if (!m) return { server: 'Claude Code', tool: name };
+    if (m[1] === SKILLS_KEY) return { server: SKILLS_LABEL, tool: m[2] };
+    return { server: store.servers().find((s) => s.key === m[1])?.name ?? m[1], tool: m[2] };
+  }
+
+  return { catalog, status, connect, disconnect, signIn, refresh, claudeConfig, labelTool };
 }
 
 module.exports = { createHost, toolName, resultText, describeError };
