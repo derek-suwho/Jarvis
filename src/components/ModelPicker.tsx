@@ -3,10 +3,12 @@ import { useEffect, useRef, useState } from 'react';
 import type { ModelSettings } from '../lib/models';
 import {
   AUTO_MODEL_ID,
+  CLAUDE_MODES,
   CONTEXT_SIZES,
   GROUP_SITES,
   REASONING_LEVELS,
   groupModels,
+  isClaudeModel,
   modelLabel,
   modelName,
 } from '../lib/models';
@@ -14,7 +16,7 @@ import { CheckIcon, ChevronDownIcon, ChevronRightIcon } from './Icons';
 import { SiteIcon } from './SiteIcon';
 import './ModelPicker.css';
 
-type Submenu = 'context' | 'reasoning' | 'model' | null;
+type Submenu = 'context' | 'reasoning' | 'mode' | 'model' | null;
 
 interface Props {
   value: ModelSettings;
@@ -100,6 +102,8 @@ export function ModelPicker({ value, onChange }: Props) {
           </div>
           {row('context', 'Context', value.context)}
           {!isAuto && row('reasoning', 'Reasoning', value.reasoning)}
+          {isClaudeModel(value.modelId) &&
+            row('mode', 'Mode', value.claudeMode === 'code' ? 'Code' : 'Chat')}
           <div className="menu-divider" />
           {row('model', 'Model', modelName(value.modelId))}
 
@@ -116,6 +120,20 @@ export function ModelPicker({ value, onChange }: Props) {
                 REASONING_LEVELS.map((r) => (
                   <Option key={r} selected={r === value.reasoning} onClick={() => pick({ reasoning: r })}>
                     {r}
+                  </Option>
+                ))}
+
+              {submenu === 'mode' &&
+                CLAUDE_MODES.map((m) => (
+                  <Option
+                    key={m.id}
+                    selected={m.id === (value.claudeMode ?? 'chat')}
+                    onClick={() => pick({ claudeMode: m.id })}
+                  >
+                    <span className="mode-option">
+                      {m.label}
+                      <span className="muted">{m.hint}</span>
+                    </span>
                   </Option>
                 ))}
 

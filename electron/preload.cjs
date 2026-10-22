@@ -20,6 +20,18 @@ contextBridge.exposeInMainWorld('jarvis', {
       return () => ipcRenderer.removeListener('chatgpt:stream-event', handler);
     },
   },
+  // Claude via the user's own Claude Code CLI; sign-in happens in Claude Code, never in Jarvis.
+  claude: {
+    status: () => ipcRenderer.invoke('claude:status'),
+    signIn: () => ipcRenderer.invoke('claude:sign-in'),
+    stream: (requestId, payload) => ipcRenderer.invoke('claude:stream', requestId, payload),
+    abort: (requestId) => ipcRenderer.invoke('claude:abort', requestId),
+    onStreamEvent: (listener) => {
+      const handler = (_event, requestId, msg) => listener(requestId, msg);
+      ipcRenderer.on('claude:stream-event', handler);
+      return () => ipcRenderer.removeListener('claude:stream-event', handler);
+    },
+  },
   saveFile: (name, content) => ipcRenderer.invoke('save-file', name, content),
   setTheme: (theme) => ipcRenderer.send('set-theme', theme),
   onCommand: (cb) => {

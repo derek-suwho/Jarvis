@@ -5,7 +5,9 @@ import { THEMES } from '../lib/preferences';
 import type { Subscriptions } from '../lib/subscriptions';
 import { PROVIDERS, setPlan } from '../lib/subscriptions';
 import type { ChatGPTAccount } from '../lib/useChatGPT';
+import type { ClaudeAccount } from '../lib/useClaude';
 import { ChatGPTConnection, ChatGPTStatusLine } from './ChatGPTAccount';
+import { ClaudeConnection, ClaudeStatusLine } from './ClaudeAccount';
 import { CloseIcon, SmallPlusIcon } from './Icons';
 import { SiteIcon } from './SiteIcon';
 import './SettingsDialog.css';
@@ -26,6 +28,7 @@ interface Props {
   initialSection?: SettingsSection;
   onClose: () => void;
   chatgpt: ChatGPTAccount;
+  claude: ClaudeAccount;
 }
 
 const THEME_LABELS: Record<Theme, string> = { system: 'System', dark: 'Dark', light: 'Light' };
@@ -55,7 +58,12 @@ function ConfirmButton({ label, onConfirm }: { label: string; onConfirm: () => v
   );
 }
 
-function SubscriptionsPanel({ subscriptions, onChange, chatgpt }: Pick<Props, 'subscriptions' | 'onChange' | 'chatgpt'>) {
+function SubscriptionsPanel({
+  subscriptions,
+  onChange,
+  chatgpt,
+  claude,
+}: Pick<Props, 'subscriptions' | 'onChange' | 'chatgpt' | 'claude'>) {
   const count = Object.keys(subscriptions).length;
   return (
     <>
@@ -63,6 +71,7 @@ function SubscriptionsPanel({ subscriptions, onChange, chatgpt }: Pick<Props, 's
         {PROVIDERS.map((p) => {
           const plan = subscriptions[p.id];
           const isChatGPT = p.id === 'openai';
+          const isClaude = p.id === 'anthropic';
           const planSelect = plan && (
             <label className="plan-select">
               <span className="sr-only">{p.name} plan</span>
@@ -86,6 +95,8 @@ function SubscriptionsPanel({ subscriptions, onChange, chatgpt }: Pick<Props, 's
                   {p.company}
                   {isChatGPT ? (
                     <ChatGPTStatusLine account={chatgpt} />
+                  ) : isClaude ? (
+                    <ClaudeStatusLine account={claude} />
                   ) : (
                     plan && <span className="status-dot">Not connected</span>
                   )}
@@ -95,6 +106,11 @@ function SubscriptionsPanel({ subscriptions, onChange, chatgpt }: Pick<Props, 's
                 <div className="provider-actions">
                   {planSelect}
                   <ChatGPTConnection account={chatgpt} />
+                </div>
+              ) : isClaude ? (
+                <div className="provider-actions">
+                  {planSelect}
+                  <ClaudeConnection account={claude} />
                 </div>
               ) : plan ? (
                 <div className="provider-actions">
@@ -122,7 +138,7 @@ function SubscriptionsPanel({ subscriptions, onChange, chatgpt }: Pick<Props, 's
         </span>
         <span>
           Jarvis never sees your passwords. ChatGPT sign-in happens in your browser and its tokens stay on this device.
-          Claude, Gemini and Grok connections are coming.
+          Claude runs through your own Claude Code, which handles its sign-in. Gemini and Grok are coming.
         </span>
       </footer>
     </>
@@ -217,7 +233,7 @@ export function SettingsDialog(props: Props) {
             </div>
           )}
 
-          {section === 'Subscriptions' && <SubscriptionsPanel subscriptions={props.subscriptions} onChange={props.onChange} chatgpt={props.chatgpt} />}
+          {section === 'Subscriptions' && <SubscriptionsPanel subscriptions={props.subscriptions} onChange={props.onChange} chatgpt={props.chatgpt} claude={props.claude} />}
 
           {section === 'Data controls' && (
             <div className="settings-rows">

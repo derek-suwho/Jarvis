@@ -29,8 +29,8 @@ import {
 import type { DesktopCommand } from './lib/desktop';
 import { fileSlug, isDesktop, isMac, saveTextFile } from './lib/desktop';
 import type { ModelSettings } from './lib/models';
-import { AUTO_MODEL_ID, DEFAULT_SETTINGS, findModel, getCatalog, modelLabel, setLiveOpenAIModels } from './lib/models';
-import { fetchChatGPTModels, streamChatGPTReply } from './lib/chatgptClient';
+import { AUTO_MODEL_ID, DEFAULT_SETTINGS, findModel, getCatalog, isClaudeModel, modelLabel, setLiveOpenAIModels } from './lib/models';
+import { fetchChatGPTModels, streamLive } from './lib/providerClient';
 import type { Preferences } from './lib/preferences';
 import { greeting, loadPreferences, savePreferences } from './lib/preferences';
 import type { Project } from './lib/projects';
@@ -40,7 +40,8 @@ import { loadSubscriptions, saveSubscriptions } from './lib/subscriptions';
 import type { BrowserState, Tab } from './lib/tabs';
 import { createBrowserTab, createSideChat, mockSideReply, updateSideChat } from './lib/tabs';
 import { useChatGPT } from './lib/useChatGPT';
-import type { LiveReply } from './useReplyStream';
+import { useClaude } from './lib/useClaude';
+import type { LiveReply } from './lib/providerClient';
 import { useReplyStream } from './useReplyStream';
 
 const REPLY_DELAY_MS = 700;
@@ -78,6 +79,7 @@ export function App() {
   const [settings, setSettings] = useState<SettingsSection | null>(null);
   const [subscriptions, setSubscriptions] = useState<Subscriptions>(loadSubscriptions);
   const chatgpt = useChatGPT();
+  const claude = useClaude();
   const { streaming, start: startReply, stop } = useReplyStream(setChats);
 
   const [tabs, setTabs] = useState<Tab[]>([]);
@@ -135,10 +137,22 @@ export function App() {
     return findModel(model.modelId)?.group === 'OpenAI' ? model.modelId : null;
   };
   const usingChatGPTPlan = chatgptSlug() !== null;
-  /** Real ChatGPT reply config for a conversation, or undefined to use the placeholder stream. */
-  const live = (history: Message[]): LiveReply | undefined => {
+  const claudeConnected = claude.state.phase === 'connected';
+  /** Real provider for this conversation, or undefined to fall back to the placeholder stream. */
+  const live = (history: Message[], conversationId: string): LiveReply | undefined => {
     const slug = chatgptSlug();
-    return slug ? { slug, history } : undefined;
+    if (slug) return { provider: 'chatgpt', slug, history };
+    if (claudeConnected && isClaudeModel(model.modelId)) {
+      return {
+        provider: 'claude',
+        slug: model.modelId,
+        history,
+        mode: model.claudeMode === 'code' ? 'code' : 'chat',
+        reasoning: model.reasoning,
+        conversationId,
+      };
+    }
+    return undefined;
   };
   const label = () => {
     const { name, detail } = modelLabel(model);
@@ -168,7 +182,7 @@ export function App() {
     }
     const msg: Message = { id: newId(), role: 'user', content: text, ...(attachments.length ? { attachments } : {}) };
     setChats((cs) => appendMessage(cs, id, msg));
-    startReply(id, text, label(), attachments, live([...(activeChat?.messages ?? []), msg]));
+    startReply(id, text, label(), attachments, live([...(activeChat?.messages ?? []), msg], id));
   };
 
   const editMessage = (messageId: string, text: string) => {
@@ -178,7 +192,7 @@ export function App() {
     const edited: Message = { ...original!, id: newId(), content: text };
     const before = activeChat.messages.slice(0, activeChat.messages.findIndex((m) => m.id === messageId));
     setChats((cs) => appendMessage(truncateFrom(cs, chatId, messageId), chatId, edited));
-    startReply(chatId, text, label(), original?.attachments, live([...before, edited]));
+    startReply(chatId, text, label(), original?.attachments, live([...before, edited], chatId));
   };
 
   const regenerate = (messageId: string) => {
@@ -189,7 +203,7 @@ export function App() {
       .reverse()
       .find((m) => m.role === 'user');
     setChats((cs) => truncateFrom(cs, activeChat.id, messageId));
-    startReply(activeChat.id, prompt?.content ?? '', label(), prompt?.attachments, live(activeChat.messages.slice(0, i)));
+    startReply(activeChat.id, prompt?.content ?? '', label(), prompt?.attachments, live(activeChat.messages.slice(0, i), activeChat.id));
   };
 
   const setFeedback = (messageId: string, feedback: Feedback | undefined) =>
@@ -275,17 +289,15 @@ export function App() {
     );
     setSidePendingId(tabId);
     const model = label();
-    const slug = chatgptSlug();
     const side = tabs.find((t) => t.id === tabId);
-    if (slug && side?.kind === 'sidechat') {
-      // Frozen context snapshot first, then this side chat's own messages.
-      const userMsg: Message = { id: newId(), role: 'user', content: text };
-      const history = [...side.sidechat.context, ...side.sidechat.messages, userMsg];
+    // Frozen context snapshot first, then this side chat's own messages.
+    const userMsg: Message = { id: newId(), role: 'user', content: text };
+    const sideLive =
+      side?.kind === 'sidechat' ? live([...side.sidechat.context, ...side.sidechat.messages, userMsg], tabId) : undefined;
+    if (sideLive) {
       setTabs((ts) => updateSideChat(ts, tabId, (s) => ({ ...s, messages: [...s.messages.slice(0, -1), userMsg] })));
-      streamChatGPTReply({
-        model: slug,
+      streamLive(sideLive, {
         label: model,
-        history,
         append: (msg: Message) =>
           setTabs((ts) => updateSideChat(ts, tabId, (s) => ({ ...s, messages: [...s.messages, msg] }))),
         update: (msgId: string, content: string) =>
@@ -529,6 +541,7 @@ export function App() {
           }
           onClose={() => setSettings(null)}
           chatgpt={chatgpt}
+          claude={claude}
         />
       )}
       <ChatGPTWelcome account={chatgpt} />

@@ -171,7 +171,7 @@ export function streamChunks(text: string, wordsPerChunk = 2): string[] {
 export function mockReply(prompt: string, model: string, attachments: Attachment[] = []): string {
   const files = attachments.length ? ` with ${attachments.length} attachment${attachments.length > 1 ? 's' : ''}` : '';
   return [
-    `**${model}** isn't connected yet, so this is a placeholder reply. Only ChatGPT works so far: connect it in Settings and pick a GPT model.`,
+    `**${model}** isn't connected yet, so this is a placeholder reply. Connect ChatGPT or Claude in Settings and pick one of their models.`,
     '',
     `You said${files}: "${titleFrom(prompt)}"`,
     '',

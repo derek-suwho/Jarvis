@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Attachment, Chat, Message } from './lib/chats';
-import { streamChatGPTReply } from './lib/chatgptClient';
+import type { LiveReply } from './lib/providerClient';
+import { streamLive } from './lib/providerClient';
+
+export type { LiveReply };
 import { appendMessage, mockReply, newId, streamChunks, updateMessage } from './lib/chats';
 
 const THINK_MS = 450;
@@ -9,10 +12,6 @@ const CHUNK_MS = 35;
 type SetChats = (fn: (cs: Chat[]) => Chat[]) => void;
 
 /** A real ChatGPT-plan reply: model slug plus the conversation to send (ending with the prompt). */
-export interface LiveReply {
-  slug: string;
-  history: Message[];
-}
 
 /**
  * Streams replies: real ChatGPT-plan replies when `live` is given, otherwise simulated streaming: a short "thinking" pause,
@@ -52,13 +51,11 @@ export function useReplyStream(setChats: SetChats) {
     const messageId = newId();
     if (live) {
       setStreaming({ chatId, messageId });
-      abortLive.current = streamChatGPTReply({
-        model: live.slug,
+      abortLive.current = streamLive(live, {
         label: model,
-        history: live.history,
         replyId: messageId,
-        append: (msg) => setChats((cs) => appendMessage(cs, chatId, msg)),
-        update: (id, content) => setChats((cs) => updateMessage(cs, chatId, id, { content })),
+        append: (msg: Message) => setChats((cs) => appendMessage(cs, chatId, msg)),
+        update: (id: string, content: string) => setChats((cs) => updateMessage(cs, chatId, id, { content })),
         onSettled: () => {
           abortLive.current = null;
           setStreaming((s) => (s?.messageId === messageId ? null : s));

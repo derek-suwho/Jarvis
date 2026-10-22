@@ -3,6 +3,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const chatgptAuth = require('./chatgpt-auth.cjs');
 const chatgptInference = require('./chatgpt-inference.cjs');
+const claudeCode = require('./claude-code.cjs');
 
 function isHttpUrl(url) {
   try {
@@ -156,6 +157,7 @@ function buildMenu() {
 app.whenReady().then(() => {
   chatgptAuth.registerIpc(ipcMain);
   chatgptInference.registerIpc(ipcMain);
+  claudeCode.registerIpc(ipcMain);
   buildMenu();
   createWindow();
   app.on('activate', () => {

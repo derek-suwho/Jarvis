@@ -11,6 +11,28 @@ export interface ChatGPTModel {
 
 export type ChatGPTStreamEvent = { type: 'delta'; text: string } | { type: 'done' } | { type: 'error'; message: string };
 
+export interface ClaudeStatus {
+  installed: boolean;
+  connected: boolean;
+  email: string | null;
+  plan: string | null;
+}
+
+export interface ClaudeStreamPayload {
+  model: string;
+  mode: 'chat' | 'code';
+  reasoning: string;
+  conversationId: string;
+  messages: { role: 'user' | 'assistant'; content: string }[];
+}
+
+/** Streaming transport shared by providers. */
+export interface StreamBridge<P> {
+  stream: (requestId: string, payload: P) => Promise<void>;
+  abort: (requestId: string) => Promise<void>;
+  onStreamEvent: (listener: (requestId: string, event: ChatGPTStreamEvent) => void) => () => void;
+}
+
 export type ChatGPTSignInResult = { ok: true; status: ChatGPTStatus } | { ok: false; error: string };
 
 /** Bridge exposed by electron/preload.cjs; absent when running in a normal browser. */
@@ -27,6 +49,10 @@ interface JarvisBridge {
     stream: (requestId: string, payload: { model: string; messages: { role: 'user' | 'assistant'; content: string }[] }) => Promise<void>;
     abort: (requestId: string) => Promise<void>;
     onStreamEvent: (listener: (requestId: string, event: ChatGPTStreamEvent) => void) => () => void;
+  };
+  claude: StreamBridge<ClaudeStreamPayload> & {
+    status: () => Promise<ClaudeStatus>;
+    signIn: () => Promise<{ ok: boolean; error?: string }>;
   };
   /** Native save dialog; resolves false when the user cancels. */
   saveFile: (name: string, content: string) => Promise<boolean>;

@@ -25,9 +25,11 @@ export const GROUP_SITES: Record<string, string> = {
 // Placeholder catalog until provider adapters report their real model lists.
 export const MODEL_CATALOG: ModelInfo[] = [
   { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol', group: 'OpenAI', defaultReasoning: 'Medium' },
-  { id: 'claude-opus-5.5', name: 'Claude Opus 5.5', group: 'Anthropic', defaultReasoning: 'Medium' },
-  { id: 'claude-fable-5.1', name: 'Claude Fable 5.1', group: 'Anthropic', defaultReasoning: 'High' },
-  { id: 'claude-sonnet-5.5', name: 'Claude Sonnet 5.5', group: 'Anthropic', defaultReasoning: 'Medium' },
+  // Claude ids are the model names Claude Code accepts with --model.
+  { id: 'claude-fable-5-1', name: 'Claude Fable 5.1', group: 'Anthropic', defaultReasoning: 'High' },
+  { id: 'claude-opus-5-5', name: 'Claude Opus 5.5', group: 'Anthropic', defaultReasoning: 'Medium' },
+  { id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5', group: 'Anthropic', defaultReasoning: 'Medium' },
+  { id: 'claude-haiku-5-5', name: 'Claude Haiku 5.5', group: 'Anthropic', defaultReasoning: 'Low' },
   { id: 'gemini-4-argon', name: 'Gemini 4 Argon', group: 'Google', defaultReasoning: 'Medium' },
   { id: 'grok-4.7', name: 'Grok 4.7', group: 'xAI', defaultReasoning: 'High', isNew: true },
   { id: 'grok-4.6', name: 'Grok 4.6', group: 'xAI', defaultReasoning: 'High' },
@@ -38,13 +40,24 @@ export interface ModelSettings {
   reasoning: Reasoning;
   context: ContextSize;
   fast: boolean;
+  /** Claude only: plain chat, or Claude Code's own coding behavior. */
+  claudeMode: ClaudeMode;
 }
+
+export const CLAUDE_MODES = [
+  { id: 'chat', label: 'Chat', hint: 'Regular Claude: Jarvis system prompt, no file access' },
+  { id: 'code', label: 'Code', hint: 'Runs your Claude Code with its own coding setup' },
+] as const;
+export type ClaudeMode = (typeof CLAUDE_MODES)[number]['id'];
+
+export const isClaudeModel = (id: string): boolean => findModel(id)?.group === 'Anthropic';
 
 export const DEFAULT_SETTINGS: ModelSettings = {
   modelId: 'gpt-5.6-sol',
   reasoning: 'Medium',
   context: '272K',
   fast: false,
+  claudeMode: 'chat',
 };
 
 let liveOpenAI: ModelInfo[] | null = null;
@@ -70,7 +83,8 @@ export function modelName(id: string): string {
 /** Trigger text: name plus muted detail, e.g. "GPT-5.6 Sol" + "Medium Fast". */
 export function modelLabel(s: ModelSettings): { name: string; detail: string } {
   if (s.modelId === AUTO_MODEL_ID) return { name: 'Auto', detail: s.fast ? 'Fast' : '' };
-  return { name: modelName(s.modelId), detail: [s.reasoning, s.fast ? 'Fast' : ''].filter(Boolean).join(' ') };
+  const mode = isClaudeModel(s.modelId) && s.claudeMode === 'code' ? 'Code' : '';
+  return { name: modelName(s.modelId), detail: [s.reasoning, mode, s.fast ? 'Fast' : ''].filter(Boolean).join(' ') };
 }
 
 /** Groups matching models in catalog order, dropping empty groups. */
