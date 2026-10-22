@@ -312,3 +312,9 @@ button:focus-visible,
     display: none;
   }
 }
+
+.site-favicon {
+  display: block;
+  flex-shrink: 0;
+  border-radius: 3px;
+}

@@ -1,9 +1,11 @@
+import type { ReactNode } from 'react';
 import type { ModelSettings } from '../lib/models';
 import type { BrowserState, Tab } from '../lib/tabs';
-import { tabTitle } from '../lib/tabs';
+import { currentUrl, tabTitle } from '../lib/tabs';
 import { BrowserTab } from './BrowserTab';
 import { ChatView } from './ChatView';
 import { CloseIcon, CollapseIcon, ExpandIcon, GlobeIcon, SideChatIcon, SmallPlusIcon } from './Icons';
+import { SiteIcon } from './SiteIcon';
 
 interface Props {
   tabs: Tab[];
@@ -11,6 +13,8 @@ interface Props {
   fullView: boolean;
   sidePendingId: string | null;
   model: ModelSettings;
+  /** Buttons shown at the start of the tab strip (sidebar toggle, new chat) when the sidebar is collapsed. */
+  leading?: ReactNode;
   onModelChange: (s: ModelSettings) => void;
   onSelect: (id: string) => void;
   onClose: (id: string) => void;
@@ -21,10 +25,18 @@ interface Props {
   onSideSend: (id: string, text: string) => void;
 }
 
+function TabIcon({ tab }: { tab: Tab }) {
+  if (tab.kind === 'sidechat') return <SideChatIcon />;
+  const url = currentUrl(tab.browser);
+  return url ? <SiteIcon site={url} fallback={<GlobeIcon />} /> : <GlobeIcon />;
+}
+
 export function TabPanel(p: Props) {
   return (
     <section className="tab-panel">
+      {/* The tab strip doubles as this pane's title bar, like ChatGPT desktop. */}
       <div className="tab-strip">
+        {p.leading}
         {p.tabs.map((t) => (
           <div
             key={t.id}
@@ -32,7 +44,7 @@ export function TabPanel(p: Props) {
             onClick={() => p.onSelect(t.id)}
             onAuxClick={(e) => e.button === 1 && p.onClose(t.id)}
           >
-            {t.kind === 'sidechat' ? <SideChatIcon /> : <GlobeIcon />}
+            <TabIcon tab={t} />
             <span className="tab-title">{tabTitle(t)}</span>
             <button
               className="tab-close"
@@ -50,16 +62,12 @@ export function TabPanel(p: Props) {
           <SmallPlusIcon />
         </button>
         <div className="spacer" />
-        <button
-          className="icon-btn"
-          title={p.fullView ? 'Exit full view' : 'Full view'}
-          onClick={p.onToggleFullView}
-        >
+        <button className="icon-btn" title={p.fullView ? 'Exit full view' : 'Full view'} onClick={p.onToggleFullView}>
           {p.fullView ? <CollapseIcon /> : <ExpandIcon />}
         </button>
       </div>
 
-      {/* Inactive tabs stay mounted (hidden) so iframes keep their page and scroll position. */}
+      {/* Inactive tabs stay mounted (hidden) so pages keep their state and scroll position. */}
       {p.tabs.map((t) => (
         <div key={t.id} className="tab-body" hidden={t.id !== p.activeTabId}>
           {t.kind === 'browser' ? (

@@ -1,0 +1,143 @@
+/* "Continue with ChatGPT": black button with the ChatGPT logo, per OpenAI's examples. */
+.cwc-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 16px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  background: #0d0d0d;
+  color: #ffffff;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color 0.2s var(--ease), transform 0.15s var(--ease);
+}
+
+.cwc-btn:hover {
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+.cwc-btn:active {
+  transform: scale(0.97);
+}
+
+.cwc-btn.compact {
+  height: 32px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+
+.connect-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.connect-note {
+  color: var(--text-dim);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.connect-note.pulsing {
+  animation: breathe 1.6s ease-in-out infinite;
+}
+
+@keyframes breathe {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.connect-error {
+  color: #f28b82;
+  font-size: 12px;
+}
+
+.status-dot.connected::before {
+  background: #4ca771;
+}
+
+.welcome-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: min(380px, 100%);
+  padding: 28px 28px 22px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: #2f2f2f;
+  box-shadow: var(--shadow);
+  text-align: center;
+  animation: pop 0.25s var(--ease);
+}
+
+.welcome-card h3 {
+  margin: 6px 0 0;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.welcome-card p {
+  margin: 0 0 8px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.cwc-banner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 18px;
+  padding: 12px 8px 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #262626;
+  animation: rise 0.5s var(--ease);
+}
+
+.cwc-banner-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cwc-banner-text strong {
+  font-weight: 500;
+}
+
+.cwc-banner-text span {
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.plan-note {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding-top: 8px;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.plan-note button {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.plan-note button:hover {
+  color: var(--text);
+}

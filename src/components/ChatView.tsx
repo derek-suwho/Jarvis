@@ -1,4 +1,4 @@
-import type { CSSProperties } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import { useEffect, useRef } from 'react';
 import type { Chat } from '../lib/chats';
 import type { ModelSettings } from '../lib/models';
@@ -15,21 +15,42 @@ interface Props {
   emptyTitle?: string;
   eyebrow?: string;
   suggestions?: string[];
+  /** Shown above the start-screen heading. */
+  banner?: ReactNode;
+  /** Shown under the composer. */
+  composerNote?: ReactNode;
 }
 
-export function ChatView({ chat, pending, model, onModelChange, onSend, emptyTitle, eyebrow, suggestions }: Props) {
+export function ChatView({
+  chat,
+  pending,
+  model,
+  onModelChange,
+  onSend,
+  emptyTitle,
+  eyebrow,
+  suggestions,
+  banner,
+  composerNote,
+}: Props) {
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chat?.messages.length, pending]);
 
-  const composer = <Composer model={model} onModelChange={onModelChange} onSend={onSend} disabled={pending} />;
+  const composer = (
+    <>
+      <Composer model={model} onModelChange={onModelChange} onSend={onSend} disabled={pending} />
+      {composerNote}
+    </>
+  );
 
   if (!chat || chat.messages.length === 0) {
     return (
       <div className="empty-state">
         <div className="empty-inner">
+          {banner}
           <p className="eyebrow">{eyebrow ?? 'New conversation'}</p>
           <h1>{emptyTitle ?? 'Where should we begin?'}</h1>
           {composer}

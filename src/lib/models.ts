@@ -14,6 +14,14 @@ export interface ModelInfo {
 
 export const AUTO_MODEL_ID = 'auto';
 
+/** Site whose favicon represents each provider group. */
+export const GROUP_SITES: Record<string, string> = {
+  OpenAI: 'chatgpt.com',
+  Anthropic: 'claude.ai',
+  Google: 'gemini.google.com',
+  xAI: 'grok.com',
+};
+
 // Placeholder catalog until provider adapters report their real model lists.
 export const MODEL_CATALOG: ModelInfo[] = [
   { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol', group: 'OpenAI', defaultReasoning: 'Medium' },

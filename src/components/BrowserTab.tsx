@@ -1,6 +1,19 @@
 import { useEffect, useState } from 'react';
 import type { BrowserState } from '../lib/tabs';
-import { canGoBack, canGoForward, currentUrl, goBack, goForward, navigate, normalizeUrl, reload } from '../lib/tabs';
+import { isDesktop, openExternal } from '../lib/desktop';
+import {
+  canGoBack,
+  canGoForward,
+  currentUrl,
+  goBack,
+  goForward,
+  navigate,
+  normalizeUrl,
+  reload,
+  replaceCurrent,
+} from '../lib/tabs';
+import { ChromiumView } from './ChromiumView';
+import { SiteIcon } from './SiteIcon';
 import { ArrowLeftIcon, ArrowRightIcon, ExternalIcon, ReloadIcon, SideChatIcon } from './Icons';
 
 interface Props {
@@ -9,12 +22,11 @@ interface Props {
   onOpenSideChat: () => void;
 }
 
-// Sites that allow being embedded in an iframe.
 const SUGGESTED = [
-  { label: 'Wikipedia', url: 'https://en.wikipedia.org/wiki/Main_Page', color: '#e2e8f0' },
-  { label: 'OpenStreetMap', url: 'https://www.openstreetmap.org/export/embed.html?bbox=-122.52,37.70,-122.35,37.83&layer=mapnik', color: '#7ebc6f' },
-  { label: 'Excalidraw', url: 'https://excalidraw.com/', color: '#a5a3ff' },
-  { label: 'Example', url: 'https://example.com/', color: '#22d3ee' },
+  { label: 'Google', url: 'https://www.google.com/' },
+  { label: 'Gmail', url: 'https://mail.google.com/' },
+  { label: 'YouTube', url: 'https://www.youtube.com/' },
+  { label: 'GitHub', url: 'https://github.com/' },
 ];
 
 export function BrowserTab({ state, onChange, onOpenSideChat }: Props) {
@@ -22,6 +34,14 @@ export function BrowserTab({ state, onChange, onOpenSideChat }: Props) {
   const [address, setAddress] = useState(url ?? '');
 
   useEffect(() => setAddress(url ?? ''), [url]);
+
+  const desktop = isDesktop();
+
+  // Pages navigating on their own (link clicks) add history; redirects of a page we asked for replace it.
+  const onPageNavigate = (landed: string, redirect: boolean) => {
+    if (landed === url) return;
+    onChange(redirect ? replaceCurrent(state, landed) : navigate(state, landed));
+  };
 
   const go = (input: string) => {
     const next = normalizeUrl(input);
@@ -58,7 +78,7 @@ export function BrowserTab({ state, onChange, onOpenSideChat }: Props) {
           className="icon-btn"
           title="Open in system browser"
           disabled={!url}
-          onClick={() => url && window.open(url, '_blank', 'noopener,noreferrer')}
+          onClick={() => url && openExternal(url)}
         >
           <ExternalIcon />
         </button>
@@ -66,17 +86,23 @@ export function BrowserTab({ state, onChange, onOpenSideChat }: Props) {
 
       {url ? (
         <div className="browser-viewport">
-          <iframe
-            key={`${state.index}:${state.reloadKey}`}
-            src={url}
-            title={url}
-            sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-            referrerPolicy="no-referrer"
-          />
-          <div className="embed-hint">
-            Blank page? Many sites (Google, GitHub…) block embedding.{' '}
-            <button onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}>Open externally</button>
-          </div>
+          {desktop ? (
+            <ChromiumView url={url} reloadKey={state.reloadKey} onNavigate={onPageNavigate} />
+          ) : (
+            <>
+              <iframe
+                key={`${state.index}:${state.reloadKey}`}
+                src={url}
+                title={url}
+                sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                referrerPolicy="no-referrer"
+              />
+              <div className="embed-hint">
+                Blank page? Many sites (Google, GitHub…) block embedding. Run <code>npm run desktop:dev</code> for the
+                full Chromium browser. <button onClick={() => openExternal(url)}>Open externally</button>
+              </div>
+            </>
+          )}
         </div>
       ) : (
         <div className="newtab-page">
@@ -95,8 +121,8 @@ export function BrowserTab({ state, onChange, onOpenSideChat }: Props) {
             <div className="suggested-grid">
               {SUGGESTED.map((s) => (
                 <button key={s.url} className="site-tile" onClick={() => go(s.url)}>
-                  <span className="site-icon" style={{ color: s.color }}>
-                    {s.label[0]}
+                  <span className="site-icon">
+                    <SiteIcon site={s.url} size={24} fallback={s.label[0]} />
                   </span>
                   <span>{s.label}</span>
                 </button>

@@ -4,12 +4,14 @@ import type { ModelSettings } from '../lib/models';
 import {
   AUTO_MODEL_ID,
   CONTEXT_SIZES,
+  GROUP_SITES,
   REASONING_LEVELS,
   groupModels,
   modelLabel,
   modelName,
 } from '../lib/models';
 import { CheckIcon, ChevronDownIcon, ChevronRightIcon } from './Icons';
+import { SiteIcon } from './SiteIcon';
 import './ModelPicker.css';
 
 type Submenu = 'context' | 'reasoning' | 'model' | null;
@@ -138,7 +140,10 @@ export function ModelPicker({ value, onChange }: Props) {
                     {groups.map((g, i) => (
                       <div key={g.group}>
                         {i > 0 && <div className="menu-divider" />}
-                        <div className="menu-group-label">{g.group}</div>
+                        <div className="menu-group-label">
+                          <SiteIcon site={GROUP_SITES[g.group] ?? ''} size={14} fallback={null} />
+                          {g.group}
+                        </div>
                         {g.models.map((m) => (
                           <Option
                             key={m.id}
