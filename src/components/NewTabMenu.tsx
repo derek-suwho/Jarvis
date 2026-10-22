@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
-import { ExpandIcon, NewTabIcon, SideChatIcon, SmallPlusIcon } from './Icons';
+import { CheckIcon, ExpandIcon, NewTabIcon, SideChatIcon, SmallPlusIcon, TemporaryIcon } from './Icons';
 
 interface Props {
   onNewTab: () => void;
   onNewTabFull: () => void;
   onSideChat: () => void;
+  /** Whether a not-yet-saved temporary chat is currently on. */
+  temporaryOn: boolean;
+  onTemporaryChat: () => void;
 }
 
-export function NewTabMenu({ onNewTab, onNewTabFull, onSideChat }: Props) {
+export function NewTabMenu({ onNewTab, onNewTabFull, onSideChat, temporaryOn, onTemporaryChat }: Props) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -25,7 +28,7 @@ export function NewTabMenu({ onNewTab, onNewTabFull, onSideChat }: Props) {
     };
   }, [open]);
 
-  const item = (icon: JSX.Element, label: string, kbd: string, action: () => void) => (
+  const item = (icon: JSX.Element, label: string, kbd: string | JSX.Element, action: () => void) => (
     <div
       className="menu-option"
       onClick={() => {
@@ -43,7 +46,7 @@ export function NewTabMenu({ onNewTab, onNewTabFull, onSideChat }: Props) {
 
   return (
     <div className="newtab-menu" ref={rootRef}>
-      <button className={`icon-btn${open ? ' pressed' : ''}`} title="New tab" onClick={() => setOpen((o) => !o)}>
+      <button className={`icon-btn${open ? ' pressed' : ''}`} title="New tab, side chat, or temporary chat" onClick={() => setOpen((o) => !o)}>
         <NewTabIcon />
       </button>
       {open && (
@@ -52,6 +55,12 @@ export function NewTabMenu({ onNewTab, onNewTabFull, onSideChat }: Props) {
           {item(<ExpandIcon />, 'New tab in full view', '⇧⌘F', onNewTabFull)}
           <div className="menu-divider" />
           {item(<SideChatIcon />, 'Side chat', '⌥⌘S', onSideChat)}
+          {item(
+            <TemporaryIcon />,
+            temporaryOn ? 'Turn off temporary chat' : 'Temporary chat',
+            temporaryOn ? <CheckIcon /> : '',
+            onTemporaryChat,
+          )}
         </div>
       )}
     </div>

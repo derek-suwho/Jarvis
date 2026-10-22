@@ -3,7 +3,7 @@ import { ChatGPTConnectBanner, ChatGPTPlanNote, ChatGPTWelcome } from './compone
 import { ChatMenu } from './components/ChatMenu';
 import { ChatView } from './components/ChatView';
 import './components/Dialogs.css';
-import { ComposeIcon, PanelRightIcon, SidebarIcon, TemporaryIcon } from './components/Icons';
+import { ComposeIcon, PanelRightIcon, SidebarIcon } from './components/Icons';
 import { NewTabMenu } from './components/NewTabMenu';
 import { ProjectHome } from './components/ProjectHome';
 import { SearchDialog } from './components/SearchDialog';
@@ -387,20 +387,17 @@ export function App() {
       {activeChat?.temporary && <span className="temp-pill">Temporary</span>}
       <div className="spacer" />
       {activeChat && !activeChat.temporary && <ChatMenu chat={activeChat} projects={projects} variant="topbar" {...chatActions} />}
-      {!activeChat && !activeProjectId && (
-        <button
-          className={`icon-btn${temporary ? ' pressed' : ''}`}
-          title={temporary ? 'Turn off temporary chat' : 'Temporary chat — not saved to history'}
-          aria-pressed={temporary}
-          onClick={() => setTemporary((t) => !t)}
-        >
-          <TemporaryIcon />
-        </button>
-      )}
       <NewTabMenu
         onNewTab={() => openTab(createBrowserTab(), false)}
         onNewTabFull={() => openTab(createBrowserTab(), true)}
         onSideChat={openSideChat}
+        temporaryOn={temporary && !activeChat}
+        onTemporaryChat={() => {
+          // Turning it off only applies before the first message; otherwise start a fresh temporary chat.
+          if (temporary && !activeChat) return setTemporary(false);
+          navigate(null);
+          setTemporary(true);
+        }}
       />
       {tabs.length > 0 && (
         <button

@@ -334,3 +334,9 @@
 .mac-titlebar .sidebar-closed .tab-strip {
   padding-left: 84px;
 }
+
+.newtab-dropdown .menu-option-label svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
