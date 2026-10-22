@@ -23,7 +23,7 @@ export type Tab =
   | { id: string; kind: 'browser'; browser: BrowserState }
   | { id: string; kind: 'sidechat'; sidechat: SideChatState };
 
-const SEARCH_URL = 'https://duckduckgo.com/?q=';
+const SEARCH_URL = 'https://www.google.com/search?q=';
 
 export function createBrowserTab(): Tab {
   return { id: newId(), kind: 'browser', browser: { history: [], index: -1, reloadKey: 0 } };
@@ -84,6 +84,14 @@ export function normalizeUrl(input: string): string | null {
 /** Visiting a page drops any forward history, like a real browser. */
 export function navigate(b: BrowserState, url: string): BrowserState {
   return { ...b, history: [...b.history.slice(0, b.index + 1), url], index: b.index + 1 };
+}
+
+/** Redirects (google.com -> www.google.com) update the current entry instead of adding one. */
+export function replaceCurrent(b: BrowserState, url: string): BrowserState {
+  if (b.index < 0) return navigate(b, url);
+  const history = [...b.history];
+  history[b.index] = url;
+  return { ...b, history };
 }
 
 export const canGoBack = (b: BrowserState) => b.index >= 0;

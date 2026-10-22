@@ -11,6 +11,7 @@ import {
   mockSideReply,
   navigate,
   normalizeUrl,
+  replaceCurrent,
   tabTitle,
   updateSideChat,
 } from '../src/lib/tabs';
@@ -24,7 +25,7 @@ describe('normalizeUrl', () => {
   });
 
   it('turns free text into a search', () => {
-    expect(normalizeUrl('best pizza')).toBe('https://duckduckgo.com/?q=best%20pizza');
+    expect(normalizeUrl('best pizza')).toBe('https://www.google.com/search?q=best%20pizza');
   });
 
   it('rejects unsafe schemes and empty input', () => {
@@ -50,6 +51,14 @@ describe('browser history', () => {
     expect(canGoForward(s)).toBe(false);
     expect(s.history).toEqual(['https://a.com/', 'https://c.com/']);
     expect(tabTitle({ ...b, browser: s })).toBe('c.com');
+  });
+});
+
+describe('replaceCurrent', () => {
+  it('swaps the current entry without growing history', () => {
+    const s = replaceCurrent(navigate({ history: [], index: -1, reloadKey: 0 }, 'https://google.com/'), 'https://www.google.com/');
+    expect(s.history).toEqual(['https://www.google.com/']);
+    expect(s.index).toBe(0);
   });
 });
 

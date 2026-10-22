@@ -2,7 +2,7 @@ import type { CSSProperties } from 'react';
 import { useState } from 'react';
 import type { Chat } from '../lib/chats';
 import { filterChats, sortByRecent } from '../lib/chats';
-import { ComposeIcon, SearchIcon, SidebarIcon, TrashIcon } from './Icons';
+import { ComposeIcon, GearIcon, SearchIcon, SidebarIcon, TrashIcon } from './Icons';
 
 interface Props {
   chats: Chat[];
@@ -11,9 +11,20 @@ interface Props {
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
   onCollapse: () => void;
+  onOpenSettings: () => void;
+  subscriptionCount: number;
 }
 
-export function Sidebar({ chats, activeId, onNewChat, onSelect, onDelete, onCollapse }: Props) {
+export function Sidebar({
+  chats,
+  activeId,
+  onNewChat,
+  onSelect,
+  onDelete,
+  onCollapse,
+  onOpenSettings,
+  subscriptionCount,
+}: Props) {
   const [searching, setSearching] = useState(false);
   const [query, setQuery] = useState('');
   const visible = filterChats(sortByRecent(chats), query);
@@ -61,7 +72,9 @@ export function Sidebar({ chats, activeId, onNewChat, onSelect, onDelete, onColl
       <div className="section-label">Recents</div>
       <nav className="history">
         {visible.length === 0 && (
-          <div className="history-empty">{query ? 'No chats match that search.' : 'Your conversations will appear here once you send a message.'}</div>
+          <div className="history-empty">
+            {query ? 'No chats match that search.' : 'Your conversations will appear here once you send a message.'}
+          </div>
         )}
         {visible.map((c, i) => (
           <div
@@ -84,6 +97,14 @@ export function Sidebar({ chats, activeId, onNewChat, onSelect, onDelete, onColl
           </div>
         ))}
       </nav>
+
+      <div className="sidebar-footer">
+        <button className="nav-item" onClick={onOpenSettings} title="Settings (⌘,)">
+          <GearIcon />
+          <span>Settings</span>
+          <span className="mono">{subscriptionCount === 0 ? 'Add plans' : `${subscriptionCount} plans`}</span>
+        </button>
+      </div>
     </aside>
   );
 }

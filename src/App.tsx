@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ChatView } from './components/ChatView';
 import { ComposeIcon, SidebarIcon } from './components/Icons';
 import { NewTabMenu } from './components/NewTabMenu';
+import { SettingsDialog } from './components/SettingsDialog';
 import { Sidebar } from './components/Sidebar';
 import { TabPanel } from './components/TabPanel';
 import './components/TabPanel.css';
@@ -9,6 +10,8 @@ import type { Chat } from './lib/chats';
 import { appendMessage, createChat, loadChats, mockReply, newId, saveChats } from './lib/chats';
 import type { ModelSettings } from './lib/models';
 import { DEFAULT_SETTINGS, modelLabel } from './lib/models';
+import type { Subscriptions } from './lib/subscriptions';
+import { loadSubscriptions, saveSubscriptions } from './lib/subscriptions';
 import type { BrowserState, Tab } from './lib/tabs';
 import { createBrowserTab, createSideChat, mockSideReply, updateSideChat } from './lib/tabs';
 
@@ -26,6 +29,8 @@ export function App() {
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [model, setModel] = useState<ModelSettings>(DEFAULT_SETTINGS);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [subscriptions, setSubscriptions] = useState<Subscriptions>(loadSubscriptions);
 
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
@@ -33,6 +38,7 @@ export function App() {
   const [sidePendingId, setSidePendingId] = useState<string | null>(null);
 
   useEffect(() => saveChats(chats), [chats]);
+  useEffect(() => saveSubscriptions(subscriptions), [subscriptions]);
 
   const activeChat = chats.find((c) => c.id === activeId) ?? null;
   const panelOpen = tabs.length > 0;
@@ -119,6 +125,7 @@ export function App() {
       if (e.shiftKey && !e.altKey && e.code === 'KeyB') s.openTab(createBrowserTab(), false);
       else if (e.shiftKey && !e.altKey && e.code === 'KeyF') s.openTab(createBrowserTab(), true);
       else if (e.altKey && !e.shiftKey && e.code === 'KeyS') s.openSideChat();
+      else if (!e.shiftKey && !e.altKey && e.key === ',') setSettingsOpen(true);
       else return;
       e.preventDefault();
     };
@@ -136,6 +143,8 @@ export function App() {
           onSelect={setActiveId}
           onDelete={deleteChat}
           onCollapse={() => setSidebarOpen(false)}
+          onOpenSettings={() => setSettingsOpen(true)}
+          subscriptionCount={Object.keys(subscriptions).length}
         />
       )}
       <main className="main">
@@ -190,6 +199,13 @@ export function App() {
           )}
         </div>
       </main>
+      {settingsOpen && (
+        <SettingsDialog
+          subscriptions={subscriptions}
+          onChange={setSubscriptions}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
     </div>
   );
 }
