@@ -1,4 +1,5 @@
 import type { Database } from './database';
+import { memoryMigration } from './memory-migration';
 export type Migration = { version: number; up(db: Database): void };
 
 const migrations: Migration[] = [{ version: 1, up(db) {
@@ -48,7 +49,7 @@ const migrations: Migration[] = [{ version: 1, up(db) {
       imported_at TEXT NOT NULL
     );
   `);
-} }];
+} }, memoryMigration];
 
 /** Each migration and its ledger write commit together; failed versions remain retryable. */
 export function migrate(db: Database, versions: readonly Migration[] = migrations): void {

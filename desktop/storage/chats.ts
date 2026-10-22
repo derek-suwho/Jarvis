@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { ChatRecord, ChatSnapshot, MessageRecord } from '../../src/shared/domain';
 import type { Role } from '../../src/shared/contracts';
 import type { Database } from './database';
+import { reconcileMemory } from './memory';
 import { createRunStore } from './runs';
 
 type ChatRow = { id: string; project_id: string | null; title: string; updated_at: string };
@@ -27,7 +28,12 @@ export function createChatStore(db: Database) {
         return { chat: record(row), messages, runs: createRunStore(db).list(id) };
       })();
     },
-    delete(id: string): void { db.transaction(() => { db.prepare('DELETE FROM chats WHERE id = ?').run(id); }).immediate(); },
+    delete(id: string): void {
+      db.transaction(() => {
+        db.prepare('DELETE FROM chats WHERE id = ?').run(id);
+        reconcileMemory(db);
+      }).immediate();
+    },
   };
 }
 export type ChatStore = ReturnType<typeof createChatStore>;

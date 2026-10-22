@@ -65,10 +65,11 @@ describe('durable chat storage', () => {
   });
 
   it('rolls back a failed migration including its ledger and remains reopenable', () => {
-    const broken: Migration = { version: 2, up(database) { database.exec('CREATE TABLE should_rollback(id TEXT)'); throw new Error('deliberate migration failure'); } };
+    const before = db.prepare('SELECT version FROM schema_migrations ORDER BY version').all() as { version: number }[];
+    const broken: Migration = { version: before.at(-1)!.version + 1, up(database) { database.exec('CREATE TABLE should_rollback(id TEXT)'); throw new Error('deliberate migration failure'); } };
     expect(() => migrate(db, [broken])).toThrow('deliberate migration failure');
     expect(db.prepare("SELECT name FROM sqlite_master WHERE name = 'should_rollback'").get()).toBeUndefined();
-    expect(db.prepare('SELECT version FROM schema_migrations ORDER BY version').all()).toEqual([{ version: 1 }]);
+    expect(db.prepare('SELECT version FROM schema_migrations ORDER BY version').all()).toEqual(before);
     db.close(); db = openDatabase(join(dir, 'chat.db'));
     expect(createProjectStore(db).create('Still works', []).name).toBe('Still works');
   });

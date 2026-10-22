@@ -10,5 +10,5 @@
     "isolatedModules": true,
     "types": ["node"]
   },
-  "include": ["desktop", "src/shared", "tests/storage"]
+  "include": ["desktop", "src/shared", "tests/storage", "tests/memory"]
 }
