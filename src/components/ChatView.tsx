@@ -1,5 +1,5 @@
 import type { CSSProperties, ReactNode } from 'react';
-import { useEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import type { Attachment, Chat, Feedback } from '../lib/chats';
 import type { ModelSettings } from '../lib/models';
 import { Composer } from './Composer';
@@ -34,6 +34,8 @@ interface Props {
 }
 
 const NEAR_BOTTOM_PX = 120;
+/** Gap kept above the anchored user message, like ChatGPT. */
+const ANCHOR_GAP_PX = 24;
 
 export function ChatView(p: Props) {
   const { chat, pending, model, onModelChange, onSend, onStop, streamingId, suggestions } = p;
@@ -43,15 +45,47 @@ export function ChatView(p: Props) {
   const messages = chat?.messages ?? [];
   const last = messages[messages.length - 1];
 
-  // Follow new messages and streamed text, but only while the reader is already at the bottom.
-  useEffect(() => {
-    if (atBottom) endRef.current?.scrollIntoView({ block: 'end' });
-  }, [messages.length, last?.content, pending]); // eslint-disable-line react-hooks/exhaustive-deps
+  const spacerRef = useRef<HTMLDivElement>(null);
+  /** User message pinned to the top while its reply streams in below it. */
+  const anchorRef = useRef<HTMLElement | null>(null);
 
-  useEffect(() => {
+  // Size the spacer so the anchored message can sit at the top even when the reply is still short.
+  const fitSpacer = () => {
+    const scroller = scrollRef.current;
+    const spacer = spacerRef.current;
+    const anchor = anchorRef.current;
+    if (!scroller || !spacer || !endRef.current) return;
+    if (!anchor?.isConnected) {
+      spacer.style.height = '0px';
+      return;
+    }
+    const used = endRef.current.getBoundingClientRect().top - anchor.getBoundingClientRect().top - spacer.offsetHeight;
+    spacer.style.height = `${Math.max(0, scroller.clientHeight - ANCHOR_GAP_PX - used)}px`;
+  };
+
+  useLayoutEffect(() => {
+    anchorRef.current = null;
+    fitSpacer();
     endRef.current?.scrollIntoView({ block: 'end' });
     setAtBottom(true);
-  }, [chat?.id]);
+  }, [chat?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // When a reply starts, pin the latest user message to the top instead of following the bottom.
+  useLayoutEffect(() => {
+    const scroller = scrollRef.current;
+    if (!pending || !scroller) return;
+    const users = scroller.querySelectorAll<HTMLElement>('.message.user');
+    anchorRef.current = users[users.length - 1] ?? null;
+    fitSpacer();
+    const anchor = anchorRef.current;
+    if (anchor) {
+      const offset = anchor.getBoundingClientRect().top - scroller.getBoundingClientRect().top - ANCHOR_GAP_PX;
+      scroller.scrollTo({ top: scroller.scrollTop + offset, behavior: 'smooth' });
+    }
+  }, [pending]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Shrink the spacer as streamed text fills the space.
+  useLayoutEffect(fitSpacer, [messages.length, last?.content]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const composer = (
     <>
@@ -118,6 +152,7 @@ export function ChatView(p: Props) {
               </div>
             </div>
           )}
+          <div ref={spacerRef} aria-hidden />
           <div ref={endRef} />
         </div>
       </div>
