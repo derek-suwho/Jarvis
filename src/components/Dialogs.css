@@ -461,3 +461,18 @@
 .desktop-mac .topbar.sidebar-closed {
   padding-left: 84px;
 }
+
+/* Top bar menus sit above the chat body and open flush with the bar's right edge. */
+.topbar {
+  position: relative;
+  z-index: 20;
+}
+
+.chat-menu.topbar {
+  position: static;
+}
+
+.chat-menu.topbar .chat-menu-list {
+  left: auto;
+  right: 12px;
+}
