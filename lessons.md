@@ -7,3 +7,6 @@
 - Subscription integration research must distinguish observed implementation, live compatibility, and documented provider permission. Free distribution does not automatically resolve usage restrictions; transcript replay does not establish persistent cross-project memory.
 - Distinguish subscription-backed model calls, embeddable coding agents, and complete native products. A Codex/Claude Code adapter does not establish ChatGPT Work/Claude Cowork feature, history, project, or memory portability.
 - Track app pricing separately from model funding. Jarvis is a monthly paid app; customers retain their own provider subscriptions. Founder-owned subscriptions establish available test accounts, not commercial integration eligibility.
+
+- Keep implementation code readable and multiline. Concise conversation and commit instructions do not authorize compressed control flow.
+- Validate evidence polarity against the complete source utterance. Model-selected substrings can strip negation or later rejection; exact quotation alone does not establish affirmative support.
