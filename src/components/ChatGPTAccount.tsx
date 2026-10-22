@@ -59,9 +59,15 @@ export function ChatGPTConnection({ account }: { account: ChatGPTAccount }) {
 export function ChatGPTStatusLine({ account }: { account: ChatGPTAccount }) {
   const { state } = account;
   if (state.phase === 'connected') {
-    return <span className="status-dot connected">{state.email ?? 'Connected'}</span>;
+    return (
+      <span className="status-dot connected" title={state.email ?? undefined}>
+        <span className="status-text">{state.email ?? 'Connected'}</span>
+      </span>
+    );
   }
-  if (state.phase === 'signed-out' && state.error) return <span className="connect-error">{state.error}</span>;
+  if (state.phase === 'signed-out' && state.error) {
+    return <span className="connect-error status-text" title={state.error}>{state.error}</span>;
+  }
   return <span className="status-dot">Not connected</span>;
 }
 

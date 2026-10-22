@@ -64,7 +64,12 @@ function SubscriptionsPanel({
   chatgpt,
   claude,
 }: Pick<Props, 'subscriptions' | 'onChange' | 'chatgpt' | 'claude'>) {
-  const count = Object.keys(subscriptions).length;
+  // A provider counts once it is signed in or has a plan recorded.
+  const linked = (id: string) =>
+    !!subscriptions[id] ||
+    (id === 'openai' && chatgpt.state.phase === 'connected') ||
+    (id === 'anthropic' && claude.state.phase === 'connected');
+  const count = PROVIDERS.filter((p) => linked(p.id)).length;
   return (
     <>
       <ul className="provider-list">
@@ -90,9 +95,11 @@ function SubscriptionsPanel({
                 <SiteIcon site={p.site} size={20} fallback={p.name[0]} />
               </span>
               <div className="provider-info">
-                <span className="provider-name">{p.name}</span>
+                <span className="provider-name">
+                  {p.name}
+                  <span className="provider-company">{p.company}</span>
+                </span>
                 <span className="provider-meta">
-                  {p.company}
                   {isChatGPT ? (
                     <ChatGPTStatusLine account={chatgpt} />
                   ) : isClaude ? (
@@ -109,7 +116,6 @@ function SubscriptionsPanel({
                 </div>
               ) : isClaude ? (
                 <div className="provider-actions">
-                  {planSelect}
                   <ClaudeConnection account={claude} />
                 </div>
               ) : plan ? (
@@ -134,12 +140,11 @@ function SubscriptionsPanel({
       </ul>
       <footer className="dialog-footnote">
         <span className="mono">
-          {count} of {PROVIDERS.length} added
+          {count} of {PROVIDERS.length} connected
         </span>
         <span>
-          Jarvis never sees your passwords. ChatGPT sign-in happens in your browser and its tokens stay on this device.
-          Claude uses the Claude Code login already on this Mac (the same one as the claude command in Terminal), so its
-          usage counts toward that plan. Gemini and Grok are coming.
+          Jarvis never sees your passwords. Claude uses this Mac&rsquo;s Claude Code login, so it shares that plan&rsquo;s
+          usage.
         </span>
       </footer>
     </>

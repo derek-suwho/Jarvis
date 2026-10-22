@@ -44,11 +44,10 @@ function ClaudeSignOut({ account }: { account: ClaudeAccount }) {
   const [armed, setArmed] = useState(false);
   return (
     <div className="connect-actions">
-      <span className="connect-note" title="Jarvis uses the Claude Code login on this Mac and never sees your credentials.">
-        {armed ? 'Also signs out Claude Code in Terminal' : "Using this Mac's Claude Code login"}
-      </span>
+      {armed && <span className="connect-note">Also signs out Terminal</span>}
       <button
         className="text-btn danger"
+        title="Signs out Claude Code on this Mac, including the claude command in Terminal"
         onBlur={() => setArmed(false)}
         onClick={() => {
           if (!armed) return setArmed(true);
@@ -67,9 +66,19 @@ export function ClaudeStatusLine({ account }: { account: ClaudeAccount }) {
   const { state } = account;
   if (state.phase === 'connected') {
     const plan = state.plan ? ` · ${state.plan[0].toUpperCase()}${state.plan.slice(1)}` : '';
-    return <span className="status-dot connected">{(state.email ?? 'Connected') + plan}</span>;
+    const text = `${state.email ?? 'Connected'}${plan} · Claude Code login on this Mac`;
+    return (
+      <span
+        className="status-dot connected"
+        title="Jarvis uses the Claude Code login already on this Mac and never sees your credentials."
+      >
+        <span className="status-text">{text}</span>
+      </span>
+    );
   }
   if (state.phase === 'not-installed') return <span className="status-dot">Claude Code not found</span>;
-  if (state.phase === 'signed-out' && state.error) return <span className="connect-error">{state.error}</span>;
+  if (state.phase === 'signed-out' && state.error) {
+    return <span className="connect-error status-text" title={state.error}>{state.error}</span>;
+  }
   return <span className="status-dot">Not connected</span>;
 }
