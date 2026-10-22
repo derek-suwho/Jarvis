@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { openExternal } from '../lib/desktop';
 import type { ClaudeAccount } from '../lib/useClaude';
 
@@ -18,7 +19,7 @@ export function ClaudeConnection({ account }: { account: ClaudeAccount }) {
         </button>
       );
     case 'connected':
-      return <span className="connect-note">Via Claude Code</span>;
+      return <ClaudeSignOut account={account} />;
     case 'signed-out':
       return state.waiting ? (
         <div className="connect-actions">
@@ -33,6 +34,32 @@ export function ClaudeConnection({ account }: { account: ClaudeAccount }) {
         </button>
       );
   }
+}
+
+/**
+ * Jarvis has no Claude login of its own: it uses the Claude Code login already on this Mac,
+ * so signing out here signs out Claude Code everywhere (including the terminal). Two clicks to confirm.
+ */
+function ClaudeSignOut({ account }: { account: ClaudeAccount }) {
+  const [armed, setArmed] = useState(false);
+  return (
+    <div className="connect-actions">
+      <span className="connect-note" title="Jarvis uses the Claude Code login on this Mac and never sees your credentials.">
+        {armed ? 'Also signs out Claude Code in Terminal' : "Using this Mac's Claude Code login"}
+      </span>
+      <button
+        className="text-btn danger"
+        onBlur={() => setArmed(false)}
+        onClick={() => {
+          if (!armed) return setArmed(true);
+          setArmed(false);
+          void account.signOut();
+        }}
+      >
+        {armed ? 'Confirm sign out' : 'Sign out'}
+      </button>
+    </div>
+  );
 }
 
 /** One-line status under the Claude provider name. */

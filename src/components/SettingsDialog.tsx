@@ -138,7 +138,8 @@ function SubscriptionsPanel({
         </span>
         <span>
           Jarvis never sees your passwords. ChatGPT sign-in happens in your browser and its tokens stay on this device.
-          Claude runs through your own Claude Code, which handles its sign-in. Gemini and Grok are coming.
+          Claude uses the Claude Code login already on this Mac (the same one as the claude command in Terminal), so its
+          usage counts toward that plan. Gemini and Grok are coming.
         </span>
       </footer>
     </>

@@ -70,7 +70,15 @@ export function useClaude() {
     }, POLL_MS);
   }, [bridge, refresh]);
 
-  return { state, signIn, refresh };
+  const signOut = useCallback(async () => {
+    if (!bridge) return;
+    stopPolling();
+    const res = await bridge.signOut();
+    if (res.ok) await refresh();
+    else setState({ phase: 'signed-out', waiting: false, error: res.error });
+  }, [bridge, refresh]);
+
+  return { state, signIn, signOut, refresh };
 }
 
 export type ClaudeAccount = ReturnType<typeof useClaude>;

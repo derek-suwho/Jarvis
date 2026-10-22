@@ -53,6 +53,7 @@ interface JarvisBridge {
   claude: StreamBridge<ClaudeStreamPayload> & {
     status: () => Promise<ClaudeStatus>;
     signIn: () => Promise<{ ok: boolean; error?: string }>;
+    signOut: () => Promise<{ ok: boolean; error?: string }>;
   };
   /** Native save dialog; resolves false when the user cancels. */
   saveFile: (name: string, content: string) => Promise<boolean>;

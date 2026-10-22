@@ -89,6 +89,14 @@ async function signIn() {
   return { ok: true };
 }
 
+/** Signs out of Claude Code itself (`claude auth logout`), which also signs out the user's terminal. */
+async function signOut() {
+  const bin = await findClaude();
+  if (!bin) return { ok: false, error: 'Claude Code is not installed.' };
+  const { err } = await run(bin, ['auth', 'logout']);
+  return err ? { ok: false, error: 'Claude Code could not sign out. Try `claude auth logout` in Terminal.' } : { ok: true };
+}
+
 /** Validates renderer input at the IPC boundary. */
 function validateRequest(payload) {
   const { model, messages, mode, reasoning, conversationId } = payload || {};
@@ -231,6 +239,7 @@ function registerIpc(ipcMain) {
   const inflight = new Map();
   ipcMain.handle('claude:status', () => status());
   ipcMain.handle('claude:sign-in', () => signIn());
+  ipcMain.handle('claude:sign-out', () => signOut());
   ipcMain.handle('claude:stream', (event, requestId, payload) => {
     if (typeof requestId !== 'string' || inflight.has(requestId)) return;
     const controller = new AbortController();

@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('jarvis', {
   claude: {
     status: () => ipcRenderer.invoke('claude:status'),
     signIn: () => ipcRenderer.invoke('claude:sign-in'),
+    signOut: () => ipcRenderer.invoke('claude:sign-out'),
     stream: (requestId, payload) => ipcRenderer.invoke('claude:stream', requestId, payload),
     abort: (requestId) => ipcRenderer.invoke('claude:abort', requestId),
     onStreamEvent: (listener) => {
