@@ -256,10 +256,10 @@ function refresh() {
 }
 
 /** Access token for ChatGPT-plan inference, refreshed when close to expiry. Main process only. */
-async function getAccessToken() {
+async function getAccessToken({ forceRefresh = false } = {}) {
   let record = readJson(credFile());
-  if (!record?.access_token) throw new Error('Not signed in to ChatGPT.');
-  if (oauth.needsRefresh(record)) record = await refresh();
+  if (!record?.access_token) throw new Error('Not signed in to ChatGPT. Continue with ChatGPT in Settings.');
+  if (forceRefresh || oauth.needsRefresh(record)) record = await refresh();
   return record.access_token;
 }
 

@@ -8,9 +8,11 @@ import { Sidebar } from './components/Sidebar';
 import { TabPanel } from './components/TabPanel';
 import './components/TabPanel.css';
 import type { Chat } from './lib/chats';
-import { appendMessage, createChat, loadChats, mockReply, newId, saveChats } from './lib/chats';
+import type { Message } from './lib/chats';
+import { appendMessage, createChat, loadChats, mockReply, newId, saveChats, updateMessage } from './lib/chats';
+import { fetchChatGPTModels, streamChatGPTReply } from './lib/chatgptClient';
 import type { ModelSettings } from './lib/models';
-import { DEFAULT_SETTINGS, MODEL_CATALOG, modelLabel } from './lib/models';
+import { AUTO_MODEL_ID, DEFAULT_SETTINGS, findModel, getCatalog, modelLabel, setLiveOpenAIModels } from './lib/models';
 import type { Subscriptions } from './lib/subscriptions';
 import { loadSubscriptions, saveSubscriptions } from './lib/subscriptions';
 import type { BrowserState, Tab } from './lib/tabs';
@@ -46,8 +48,41 @@ export function App() {
 
   const activeChat = chats.find((c) => c.id === activeId) ?? null;
   const panelOpen = tabs.length > 0 && panelVisible;
-  const usingChatGPTPlan =
-    chatgpt.state.phase === 'connected' && MODEL_CATALOG.find((m) => m.id === model.modelId)?.group === 'OpenAI';
+  const chatgptConnected = chatgpt.state.phase === 'connected';
+
+  // When signed in, the OpenAI group lists the account's real models instead of placeholders.
+  const [, setCatalogVersion] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    if (!chatgptConnected) {
+      setLiveOpenAIModels(null);
+      setCatalogVersion((v) => v + 1);
+      return;
+    }
+    fetchChatGPTModels()
+      .then((models) => {
+        if (cancelled) return;
+        setLiveOpenAIModels(models);
+        setCatalogVersion((v) => v + 1);
+        setModel((m) =>
+          m.modelId !== AUTO_MODEL_ID && !findModel(m.modelId) && models[0] ? { ...m, modelId: models[0].slug } : m,
+        );
+      })
+      .catch(() => {
+        // Keep placeholders; sending will surface the real error.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [chatgptConnected]);
+
+  /** ChatGPT slug for the current selection, or null when it can't go through the ChatGPT plan. */
+  const chatgptSlug = (): string | null => {
+    if (!chatgptConnected) return null;
+    if (model.modelId === AUTO_MODEL_ID) return getCatalog().find((m) => m.group === 'OpenAI')?.id ?? null;
+    return findModel(model.modelId)?.group === 'OpenAI' ? model.modelId : null;
+  };
+  const usingChatGPTPlan = chatgptSlug() !== null;
   const label = () => {
     const { name, detail } = modelLabel(model);
     return `${name} ${detail}`.trim();
@@ -63,9 +98,23 @@ export function App() {
       setActiveId(id);
     }
     const chatId = id;
-    setChats((cs) => appendMessage(cs, chatId, { id: newId(), role: 'user', content: text }));
+    const userMsg: Message = { id: newId(), role: 'user', content: text };
+    const history = [...(activeChat?.messages ?? []), userMsg];
+    setChats((cs) => appendMessage(cs, chatId, userMsg));
     setPendingId(chatId);
     const model = label();
+    const slug = chatgptSlug();
+    if (slug) {
+      streamChatGPTReply({
+        model: slug,
+        label: model,
+        history,
+        append: (msg) => setChats((cs) => appendMessage(cs, chatId, msg)),
+        update: (msgId, content) => setChats((cs) => updateMessage(cs, chatId, msgId, content)),
+        setPending: (p) => setPendingId((cur) => (p ? chatId : cur === chatId ? null : cur)),
+      });
+      return;
+    }
     setTimeout(() => {
       setChats((cs) =>
         appendMessage(cs, chatId, { id: newId(), role: 'assistant', content: mockReply(text, model), model }),
@@ -127,6 +176,29 @@ export function App() {
     );
     setSidePendingId(tabId);
     const model = label();
+    const slug = chatgptSlug();
+    const side = tabs.find((t) => t.id === tabId);
+    if (slug && side?.kind === 'sidechat') {
+      // Frozen context snapshot first, then this side chat's own messages.
+      const userMsg: Message = { id: newId(), role: 'user', content: text };
+      const history = [...side.sidechat.context, ...side.sidechat.messages, userMsg];
+      setTabs((ts) => updateSideChat(ts, tabId, (s) => ({ ...s, messages: [...s.messages.slice(0, -1), userMsg] })));
+      streamChatGPTReply({
+        model: slug,
+        label: model,
+        history,
+        append: (msg) => setTabs((ts) => updateSideChat(ts, tabId, (s) => ({ ...s, messages: [...s.messages, msg] }))),
+        update: (msgId, content) =>
+          setTabs((ts) =>
+            updateSideChat(ts, tabId, (s) => ({
+              ...s,
+              messages: s.messages.map((m) => (m.id === msgId ? { ...m, content } : m)),
+            })),
+          ),
+        setPending: (p) => setSidePendingId((cur) => (p ? tabId : cur === tabId ? null : cur)),
+      });
+      return;
+    }
     setTimeout(() => {
       setTabs((ts) =>
         updateSideChat(ts, tabId, (s) => ({

@@ -75,7 +75,7 @@ export function ChatView({
     <div className="conversation">
       <div className="messages">
         {chat.messages.map((m) => (
-          <div key={m.id} className={`message ${m.role}`}>
+          <div key={m.id} className={`message ${m.role}${m.error ? ' error' : ''}`}>
             {m.role === 'assistant' && m.model && <div className="message-model">{m.model}</div>}
             <div className="message-body">{m.content}</div>
           </div>

@@ -47,9 +47,24 @@ export const DEFAULT_SETTINGS: ModelSettings = {
   fast: false,
 };
 
+let liveOpenAI: ModelInfo[] | null = null;
+
+/** Swaps the placeholder OpenAI models for the signed-in ChatGPT account's real list (null restores them). */
+export function setLiveOpenAIModels(models: { slug: string; name: string }[] | null): void {
+  liveOpenAI = models?.length
+    ? models.map((m) => ({ id: m.slug, name: m.name, group: 'OpenAI', defaultReasoning: 'Medium' as Reasoning }))
+    : null;
+}
+
+export function getCatalog(): ModelInfo[] {
+  return liveOpenAI ? [...liveOpenAI, ...MODEL_CATALOG.filter((m) => m.group !== 'OpenAI')] : MODEL_CATALOG;
+}
+
+export const findModel = (id: string): ModelInfo | undefined => getCatalog().find((m) => m.id === id);
+
 export function modelName(id: string): string {
   if (id === AUTO_MODEL_ID) return 'Auto';
-  return MODEL_CATALOG.find((m) => m.id === id)?.name ?? id;
+  return findModel(id)?.name ?? id;
 }
 
 /** Trigger text: name plus muted detail, e.g. "GPT-5.6 Sol" + "Medium Fast". */
@@ -62,7 +77,7 @@ export function modelLabel(s: ModelSettings): { name: string; detail: string } {
 export function groupModels(query: string): { group: string; models: ModelInfo[] }[] {
   const q = query.trim().toLowerCase();
   const groups: { group: string; models: ModelInfo[] }[] = [];
-  for (const m of MODEL_CATALOG) {
+  for (const m of getCatalog()) {
     if (q && !m.name.toLowerCase().includes(q)) continue;
     let g = groups.find((x) => x.group === m.group);
     if (!g) groups.push((g = { group: m.group, models: [] }));

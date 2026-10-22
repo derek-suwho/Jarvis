@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const path = require('node:path');
 const chatgptAuth = require('./chatgpt-auth.cjs');
+const chatgptInference = require('./chatgpt-inference.cjs');
 
 function isHttpUrl(url) {
   try {
@@ -73,6 +74,7 @@ ipcMain.handle('open-external', (_event, url) => {
 
 app.whenReady().then(() => {
   chatgptAuth.registerIpc(ipcMain);
+  chatgptInference.registerIpc(ipcMain);
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

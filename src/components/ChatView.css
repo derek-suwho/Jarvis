@@ -245,3 +245,7 @@
   color: #2f2f2f;
   cursor: default;
 }
+
+.message.error .message-body {
+  color: #f28b82;
+}

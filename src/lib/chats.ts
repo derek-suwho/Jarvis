@@ -5,6 +5,8 @@ export interface Message {
   role: Role;
   content: string;
   model?: string;
+  /** A failed reply; shown but never sent back to a model as context. */
+  error?: boolean;
 }
 
 export interface Chat {
@@ -40,6 +42,12 @@ export function appendMessage(chats: Chat[], chatId: string, msg: Message, now =
           messages: [...c.messages, msg],
           updatedAt: now,
         },
+  );
+}
+
+export function updateMessage(chats: Chat[], chatId: string, msgId: string, content: string): Chat[] {
+  return chats.map((c) =>
+    c.id !== chatId ? c : { ...c, messages: c.messages.map((m) => (m.id === msgId ? { ...m, content } : m)) },
   );
 }
 
@@ -79,5 +87,5 @@ export function saveChats(chats: Chat[]): void {
 
 /** Placeholder until provider adapters exist. */
 export function mockReply(prompt: string, model: string): string {
-  return `(${model} placeholder) No provider is connected yet. You said: "${titleFrom(prompt)}"`;
+  return `${model} isn't connected yet, so this is a placeholder reply. Only ChatGPT works so far: connect it in Settings and pick a GPT model. You said: "${titleFrom(prompt)}"`;
 }

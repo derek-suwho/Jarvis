@@ -4,6 +4,13 @@ export interface ChatGPTStatus {
   registered: boolean;
 }
 
+export interface ChatGPTModel {
+  slug: string;
+  name: string;
+}
+
+export type ChatGPTStreamEvent = { type: 'delta'; text: string } | { type: 'done' } | { type: 'error'; message: string };
+
 export type ChatGPTSignInResult = { ok: true; status: ChatGPTStatus } | { ok: false; error: string };
 
 /** Bridge exposed by electron/preload.cjs; absent when running in a normal browser. */
@@ -16,6 +23,10 @@ interface JarvisBridge {
     signIn: () => Promise<ChatGPTSignInResult>;
     cancel: () => Promise<void>;
     signOut: () => Promise<{ ok: boolean; revoked: boolean }>;
+    models: () => Promise<ChatGPTModel[]>;
+    stream: (requestId: string, payload: { model: string; messages: { role: 'user' | 'assistant'; content: string }[] }) => Promise<void>;
+    abort: (requestId: string) => Promise<void>;
+    onStreamEvent: (listener: (requestId: string, event: ChatGPTStreamEvent) => void) => () => void;
   };
 }
 
