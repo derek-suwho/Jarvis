@@ -1,0 +1,105 @@
+.tools-intro {
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.tools-notice {
+  padding-top: 10px;
+}
+
+.tools-source {
+  margin-left: 8px;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.tools-import section {
+  padding: 12px 0 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tools-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 500;
+}
+
+.tools-pick-list {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+}
+
+.tools-pick-list.compact {
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.tools-pick-list label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 0;
+  cursor: pointer;
+}
+
+.tools-pick-list.compact label {
+  padding: 5px 0;
+}
+
+.tools-pick-list input,
+.tools-switch input {
+  accent-color: var(--accent);
+}
+
+.tools-pick-list input {
+  margin-top: 3px;
+}
+
+.tools-pick-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+
+.tools-target {
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: 11.5px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.tools-secret {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.tools-import .settings-hint {
+  padding-top: 12px;
+  font-size: 12.5px;
+}
+
+.tools-import-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 16px;
+}
+
+.add-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.tools-switch {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 6px;
+  cursor: pointer;
+}

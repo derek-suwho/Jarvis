@@ -33,6 +33,17 @@ contextBridge.exposeInMainWorld('jarvis', {
       return () => ipcRenderer.removeListener('claude:stream-event', handler);
     },
   },
+  // Tools layer: MCP servers and skills imported from Claude and ChatGPT. Secrets stay in the main process.
+  tools: {
+    state: () => ipcRenderer.invoke('tools:state'),
+    scan: () => ipcRenderer.invoke('tools:scan'),
+    import: (ids) => ipcRenderer.invoke('tools:import', ids),
+    setEnabled: (id, enabled) => ipcRenderer.invoke('tools:set-enabled', id, enabled),
+    removeServer: (id) => ipcRenderer.invoke('tools:remove-server', id),
+    removeSkill: (id) => ipcRenderer.invoke('tools:remove-skill', id),
+    signIn: (id) => ipcRenderer.invoke('tools:sign-in', id),
+    refresh: () => ipcRenderer.invoke('tools:refresh'),
+  },
   saveFile: (name, content) => ipcRenderer.invoke('save-file', name, content),
   setTheme: (theme) => ipcRenderer.send('set-theme', theme),
   onCommand: (cb) => {

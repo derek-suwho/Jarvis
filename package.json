@@ -16,9 +16,11 @@
   "dependencies": {
     "@fontsource-variable/geist": "5.2.8",
     "@fontsource-variable/geist-mono": "5.2.7",
+    "@modelcontextprotocol/sdk": "1.32.1",
     "better-sqlite3": "13.0.3",
     "react": "18.3.1",
-    "react-dom": "18.3.1"
+    "react-dom": "18.3.1",
+    "smol-toml": "1.9.1"
   },
   "devDependencies": {
     "@types/better-sqlite3": "9.6.0",

@@ -44,6 +44,17 @@ describe('buildArgs', () => {
     expect(args).not.toContain('--tools');
   });
 
+  it('passes Jarvis tools through an MCP config file, strict only in chat mode', () => {
+    const mcp = { file: '/tmp/claude-mcp.json', names: ['github', 'skills'] };
+    const chat = claude.buildArgs(req([{ role: 'user', content: 'hi' }], { conversationId: 'mcp-chat' }), mcp).args;
+    expect(flag(chat, '--mcp-config')).toBe(mcp.file);
+    expect(flag(chat, '--allowedTools')).toBe('mcp__github,mcp__skills');
+    expect(chat).toContain('--strict-mcp-config');
+    const code = claude.buildArgs(req([{ role: 'user', content: 'hi' }], { mode: 'code', conversationId: 'mcp-code' }), mcp).args;
+    expect(flag(code, '--mcp-config')).toBe(mcp.file);
+    expect(code).not.toContain('--strict-mcp-config');
+  });
+
   it('resumes a session only when the earlier history matches exactly', () => {
     const first = req([{ role: 'user', content: 'plan a trip' }], { conversationId: 'resume' });
     const a = claude.buildArgs(first);

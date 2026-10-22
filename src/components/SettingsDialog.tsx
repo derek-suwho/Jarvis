@@ -10,9 +10,10 @@ import { ChatGPTConnection, ChatGPTStatusLine } from './ChatGPTAccount';
 import { ClaudeConnection, ClaudeStatusLine } from './ClaudeAccount';
 import { CloseIcon, SmallPlusIcon } from './Icons';
 import { SiteIcon } from './SiteIcon';
+import { ToolsPanel } from './ToolsPanel';
 import './SettingsDialog.css';
 
-export const SETTINGS_SECTIONS = ['General', 'Personalization', 'Subscriptions', 'Data controls'] as const;
+export const SETTINGS_SECTIONS = ['General', 'Personalization', 'Subscriptions', 'Tools', 'Data controls'] as const;
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
 
 interface Props {
@@ -37,6 +38,7 @@ const DESCRIPTIONS: Record<SettingsSection, string> = {
   General: 'How Jarvis looks and what it calls you.',
   Personalization: 'Instructions every new chat follows, in addition to project instructions.',
   Subscriptions: 'Add the AI plans you already pay for. Jarvis will route models through these instead of separate API billing.',
+  Tools: 'MCP servers and skills every model in Jarvis can use, ChatGPT and Claude alike.',
   'Data controls': 'Everything is stored on this device only.',
 };
 
@@ -240,6 +242,8 @@ export function SettingsDialog(props: Props) {
           )}
 
           {section === 'Subscriptions' && <SubscriptionsPanel subscriptions={props.subscriptions} onChange={props.onChange} chatgpt={props.chatgpt} claude={props.claude} />}
+
+          {section === 'Tools' && <ToolsPanel />}
 
           {section === 'Data controls' && (
             <div className="settings-rows">

@@ -26,6 +26,39 @@ export interface ClaudeStreamPayload {
   messages: { role: 'user' | 'assistant'; content: string }[];
 }
 
+export interface ToolServer {
+  id: string;
+  name: string;
+  /** Where it came from, e.g. "Claude Code" or "Codex plugin · figma". */
+  label: string;
+  transport: 'stdio' | 'http' | 'sse';
+  /** Command line or URL. */
+  target: string;
+  enabled: boolean;
+  status: 'off' | 'idle' | 'connecting' | 'connected' | 'needs-auth' | 'error';
+  error: string | null;
+  toolCount: number;
+}
+
+export interface ToolSkill {
+  id: string;
+  name: string;
+  description: string;
+  label: string;
+}
+
+export interface ToolsState {
+  servers: ToolServer[];
+  skills: ToolSkill[];
+}
+
+/** What a scan found; only secret names are included, never values. */
+export interface ToolsScan {
+  servers: { id: string; name: string; label: string; transport: ToolServer['transport']; target: string; secretKeys: string[]; selected: boolean }[];
+  skills: (ToolSkill & { selected: boolean })[];
+  notes: string[];
+}
+
 /** Streaming transport shared by providers. */
 export interface StreamBridge<P> {
   stream: (requestId: string, payload: P) => Promise<void>;
@@ -54,6 +87,16 @@ interface JarvisBridge {
     status: () => Promise<ClaudeStatus>;
     signIn: () => Promise<{ ok: boolean; error?: string }>;
     signOut: () => Promise<{ ok: boolean; error?: string }>;
+  };
+  tools: {
+    state: () => Promise<ToolsState>;
+    scan: () => Promise<ToolsScan>;
+    import: (ids: string[]) => Promise<{ servers: number; skills: number; failed: string[] }>;
+    setEnabled: (id: string, enabled: boolean) => Promise<ToolsState>;
+    removeServer: (id: string) => Promise<ToolsState>;
+    removeSkill: (id: string) => Promise<ToolsState>;
+    signIn: (id: string) => Promise<{ ok: boolean; error?: string; state: ToolsState }>;
+    refresh: () => Promise<ToolsState>;
   };
   /** Native save dialog; resolves false when the user cancels. */
   saveFile: (name: string, content: string) => Promise<boolean>;

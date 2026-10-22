@@ -7,12 +7,13 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const tools = require('./tools/index.cjs');
 
 const CHAT_SYSTEM_PROMPT = [
   'You are Claude, chatting with the user inside Jarvis, a desktop chat app.',
   'Be a helpful, thoughtful general-purpose assistant: answer directly, use Markdown when it helps',
   '(headings, lists, tables, fenced code), and match the depth of your answer to the question.',
-  'You have no access to the user\'s files or computer in this mode.',
+  'You have no access to the user\'s files or computer in this mode, apart from any tools you are given.',
 ].join(' ');
 
 const EFFORT = { None: 'low', Low: 'low', Medium: 'medium', High: 'high', 'Extra High': 'xhigh', Max: 'max' };
@@ -143,7 +144,10 @@ function recordSession(req, sessionId, replyText) {
   sessions.set(req.conversationId, { sessionId, digest: digest(replied), mode: req.mode, model: req.model });
 }
 
-function buildArgs(req) {
+/**
+ * @param {{ file: string, names: string[] } | null} [mcp] Jarvis's tools layer (see tools/index.cjs), or null when nothing is set up.
+ */
+function buildArgs(req, mcp = null) {
   const prior = req.messages.slice(0, -1);
   const cached = sessions.get(req.conversationId);
   const resume =
@@ -158,7 +162,12 @@ function buildArgs(req) {
     // Plain chat: Jarvis's system prompt, no built-in tools, and none of the user's hooks or CLAUDE.md.
     args.push('--system-prompt', CHAT_SYSTEM_PROMPT, '--tools', '', '--setting-sources', '');
   }
-  // Code mode keeps Claude Code's defaults; tools needing approval are denied in print mode.
+  if (mcp) {
+    // Jarvis's imported servers and skills; chat mode sees only these, code mode adds them to the user's own.
+    args.push('--mcp-config', mcp.file, '--allowedTools', mcp.names.map((n) => `mcp__${n}`).join(','));
+    if (req.mode === 'chat') args.push('--strict-mcp-config');
+  }
+  // Code mode keeps Claude Code's defaults; other tools needing approval are denied in print mode.
   return { args, prompt, sessionId };
 }
 
@@ -175,7 +184,8 @@ async function streamResponse(payload, emit, signal) {
     emit({ type: 'error', message: 'Claude Code is not installed, so Jarvis cannot reach Claude.' });
     return;
   }
-  const { args, prompt, sessionId } = buildArgs(req);
+  const mcp = await tools.claudeMcpConfigFile().catch(() => null);
+  const { args, prompt, sessionId } = buildArgs(req, mcp);
   const child = spawn(bin, args, { cwd: workspace(), stdio: ['pipe', 'pipe', 'pipe'] });
   signal?.addEventListener('abort', () => child.kill('SIGTERM'));
   child.stdin.end(prompt);
