@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { importProviderHistory } from '../../desktop/importers';
 import * as adapter from '../../desktop/importers/chatgpt';
 import type { ImportLimits } from '../../desktop/importers/types';
 
@@ -145,16 +146,65 @@ describe('ChatGPT account-export adapter', () => {
     expect(JSON.stringify(result)).not.toContain('file://secret');
   });
 
-  it('keeps system/tool text archival and drops executable tool payloads', () => {
+  it.each(['text', 'code'])('omits system/tool messages and their %s payloads from the entire import result', async contentType => {
     const value = fixture();
-    value.mapping['question-node'].message.author.role = 'system';
-    value.mapping['answer-node'].message.author.role = 'tool';
-    value.mapping['answer-node'].message.content = { content_type: 'code', language: 'python', text: 'delete_everything()' };
-    const result = parse(value);
-    expect(result.messages.map(message => message.role)).toEqual(['system', 'tool']);
-    expect(result.messages[1].parts).toEqual([]);
-    expect(result.quality).toBe('partial');
-    expect(JSON.stringify(result)).not.toContain('delete_everything');
+    value.mapping.root.message = {
+      id: 'hidden-system', author: { role: 'system' }, create_time: 1700000000,
+      content: { content_type: 'text', parts: ['HIDDEN_SYSTEM_TEXT'] },
+      metadata: { internal: 'HIDDEN_SYSTEM_PAYLOAD' },
+    };
+    value.mapping['answer-node'].children = ['hidden-tool-node'];
+    value.mapping['hidden-tool-node'] = {
+      id: 'hidden-tool-node', parent: 'answer-node', children: [],
+      message: {
+        id: 'hidden-tool', author: { role: 'tool' }, create_time: 1700000003,
+        content: contentType === 'text'
+          ? { content_type: 'text', parts: ['HIDDEN_TOOL_TEXT'] }
+          : { content_type: 'code', language: 'python', text: 'HIDDEN_TOOL_PAYLOAD()' },
+      },
+    };
+    value.current_node = 'hidden-tool-node';
+    const parsed = parse(value);
+    expect(parsed.messages.map(message => message.role)).toEqual(['user', 'assistant']);
+    expect(parsed).toMatchObject({ quality: 'partial', warnings: ['UNSUPPORTED_CONTENT'], skippedArtifacts: contentType === 'text' ? 2 : 3 });
+    expect(JSON.stringify(parsed)).not.toContain('HIDDEN_');
+    const result = await importProviderHistory(JSON.stringify([value]));
+    expect(result.status).toBe('ready');
+    expect(result.conversations[0].messages.map(message => message.role)).toEqual(['user', 'assistant']);
+    expect(result.conversations[0].quality).toBe('partial');
+    expect(result.counts).toMatchObject({ messages: 2, skippedArtifacts: parsed.skippedArtifacts });
+    expect(result.warnings.map(warning => warning.code)).toContain('UNSUPPORTED_CONTENT');
+    expect(JSON.stringify(result)).not.toContain('HIDDEN_');
+  });
+
+  it.each([
+    [], [{ attachments: ['OMITTED_ATTACHMENT'], citations: ['OMITTED_CITATION'] }],
+    '{"attachments":["OMITTED_ATTACHMENT"],"citations":["OMITTED_CITATION"]}',
+    '', 0, 1, true, false,
+  ].map(metadata => [metadata]))('rejects malformed metadata instead of reporting structured history: %j', async metadata => {
+    const value = fixture();
+    value.mapping['answer-node'].message.metadata = metadata;
+    reject(value, 'INVALID_CONTENT');
+    const result = await importProviderHistory(JSON.stringify([value]));
+    expect(result.status).toBe('rejected');
+    expect(result.conversations).toEqual([]);
+    expect(result.rejections).toEqual([expect.objectContaining({ code: 'INVALID_CONTENT', recordIndex: 0 })]);
+    expect(JSON.stringify(result)).not.toContain('OMITTED_');
+  });
+
+  it.each([
+    new Date(0), new Map(), new Set(), new String('metadata'),
+    Object.create({ attachments: ['OMITTED_ATTACHMENT'], citations: ['OMITTED_CITATION'] }),
+  ])('rejects metadata with exotic prototypes: %j', metadata => {
+    const value = fixture();
+    value.mapping['answer-node'].message.metadata = metadata;
+    reject(value, 'INVALID_CONTENT');
+  });
+
+  it.each([undefined, null, {}, Object.create(null)])('accepts absent, null, and plain metadata: %j', metadata => {
+    const value = fixture();
+    value.mapping['answer-node'].message.metadata = metadata;
+    expect(parse(value).quality).toBe('structured');
   });
 
   it('bounds every graph node and text part before branch selection', () => {
@@ -196,15 +246,77 @@ describe('ChatGPT account-export adapter', () => {
     reject(value, 'INVALID_CONTENT');
   });
 
-  it('bounds wide-graph validation time so cancellation checkpoints remain reachable', () => {
+  it('bounds each children collection before reading or mapping any child', () => {
     const value = fixture();
-    const children = Array.from({ length: 99999 }, (_, index) => `child-${index}`);
-    value.mapping = { root: { id: 'root', parent: null, children, message: null } };
-    for (const id of children) value.mapping[id] = { id, parent: 'root', children: [], message: null };
-    value.current_node = children[0];
-    const start = performance.now();
-    expect(parse(value, { maxMessages: 100000 }).messages).toEqual([]);
-    // A generous ceiling for a linear pass; repeated sibling scans take seconds.
-    expect(performance.now() - start).toBeLessThan(1500);
-  }, 20000);
+    let reads = 0;
+    value.mapping.root.children = new Proxy(Array(1000000), {
+      get(target, property, receiver) {
+        if (property === 'map' || (typeof property === 'string' && /^\d+$/.test(property))) {
+          reads++;
+          throw new Error('Children were processed before the size check');
+        }
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    reject(value, 'LIMIT_EXCEEDED');
+    expect(reads).toBe(0);
+  });
+
+  it('bounds total child edges before processing the collection that exceeds the graph budget', () => {
+    const value = fixture();
+    let reads = 0;
+    const overBudget = ['root'];
+    Object.defineProperty(overBudget, 0, { get() { reads++; return 'root'; } });
+    value.mapping = {
+      root: { id: 'root', parent: null, children: ['a', 'b'], message: null },
+      a: { id: 'a', parent: 'root', children: overBudget, message: null },
+      b: { id: 'b', parent: 'root', children: [], message: null },
+    };
+    value.current_node = 'a';
+    reject(value, 'LIMIT_EXCEEDED');
+    expect(reads).toBe(0);
+  });
+
+  it.each(['wide', 'deep'])('bounds %s graph processing by collection operations, independent of wall-clock time', shape => {
+    for (const size of [64, 512]) {
+      const value = fixture();
+      const ids = Array.from({ length: size }, (_, index) => `node-${index}`);
+      value.mapping = Object.fromEntries(ids.map((id, index) => [id, {
+        id, parent: index === 0 ? null : shape === 'wide' ? ids[0] : ids[index - 1],
+        children: shape === 'wide' ? (index === 0 ? ids.slice(1) : []) : ids.slice(index + 1, index + 2),
+        message: null,
+      }]));
+      value.current_node = ids[size - 1];
+      let operations = 0;
+      const get = Map.prototype.get;
+      const has = Set.prototype.has;
+      const iterate = Set.prototype[Symbol.iterator];
+      const spies = [
+        vi.spyOn(Map.prototype, 'get').mockImplementation(function (this: Map<unknown, unknown>, key) {
+          operations++;
+          return get.call(this, key);
+        }),
+        vi.spyOn(Set.prototype, 'has').mockImplementation(function (this: Set<unknown>, key) {
+          operations++;
+          return has.call(this, key);
+        }),
+        vi.spyOn(Set.prototype, Symbol.iterator).mockImplementation(function* (this: Set<unknown>): Generator<unknown, undefined, unknown> {
+          for (const item of iterate.call(this)) {
+            operations++;
+            yield item;
+          }
+          return undefined;
+        }),
+      ];
+      let result;
+      try {
+        result = adapter.parseChatGPT(value, { ...limits, maxMessages: size });
+      } finally {
+        for (const spy of spies) spy.mockRestore();
+      }
+      expect(result.messages).toEqual([]);
+      expect(operations).toBeGreaterThan(size);
+      expect(operations).toBeLessThanOrEqual(20 * size);
+    }
+  });
 });

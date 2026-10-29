@@ -23,9 +23,10 @@ memory systems.
 - **Safety:** credentials/tokens never migrate. Hooks remain disabled. Plugins
   and MCP servers require separate explicit user review before activation.
 - **Jarvis memory:** starts mostly fresh and grows from activity inside Jarvis.
-  Imported historical conversations remain history/search context and never
-  automatically feed durable-memory extraction. Selected project-memory assets
-  remain project references; they do not automatically seed global memory either.
+  The importer encodes `exclude-from-automatic-memory` for historical conversations
+  and project-reference-only use for selected project-memory assets. Preserving
+  these policies in persistence, search, queues, and memory extraction is required
+  integration work; this PR does not implement or verify that enforcement.
 
 ## Consumer history API
 
@@ -47,9 +48,10 @@ HTML, scripts, tools, URLs, or instructions.
 The public types live in `desktop/importers/types.ts`:
 
 - `mode: 'consumer-history'` distinguishes history from setup selection plans.
-- `memoryPolicy: 'exclude-from-automatic-memory'` is required on every result
-  (including rejection/cancellation) and each accepted conversation. There is no
-  import option or provider metadata that opts into automatic memory extraction.
+- The importer encodes `memoryPolicy: 'exclude-from-automatic-memory'` on every
+  result (including rejection/cancellation) and each accepted conversation.
+  Import options and provider metadata cannot override this encoded value.
+  It does not itself enforce persistence, search, queue, or memory-extractor policy.
 - `status`: `ready`, `rejected`, or `cancelled`. `ready` means an accepted preview
   exists, not that anything was persisted.
 - `schemaVersion: 1` identifies this importer contract, not a vendor schema.
@@ -59,12 +61,12 @@ The public types live in `desktop/importers/types.ts`:
 - `importId`: SHA-256 of exact input bytes, or null when rejected before hashing.
 - `conversations`: canonical IDs, content revisions, titles, normalized timestamps,
   quality, ordered messages, and allowlisted source provenance.
-- Messages contain only typed text parts, an archival role, timestamp, canonical
+- Messages contain only typed text parts, a `user` or `assistant` role, timestamp, canonical
   ID/revision, and provider/conversation/message IDs (plus ChatGPT node ID).
 - `counts`: accepted conversations/messages, skipped artifacts, rejected records.
   Skipped artifacts count omitted archive entries (including directory entries),
-  branches, content blocks, and attachment/citation records; they are not a count
-  of unique physical files.
+  branches, hidden system/tool messages, content blocks, and attachment/citation
+  records; they are not a count of unique physical files.
 - `warnings`/`rejections`: machine-readable codes, fixed safe messages, and optional
   zero-based record indexes. Indexes follow input arrays, concatenated in ZIP path
   order. No diagnostic echoes source titles, paths, content, or error messages.
@@ -76,9 +78,18 @@ error is not counted as a rejected conversation. No outcome changes a database.
 
 ## Tested export shapes
 
-Official help confirms the export mechanism, not an exhaustive JSON contract.
-Fixtures are synthetic representations of observed account-export shapes; they
-contain no Derek conversations, provider credentials, or real tokens.
+Fixtures are synthetic test inputs for the shapes described below. They do not
+establish compatibility with current real exports or an official stable schema.
+No sanitized current real-export fixtures were available for this PR. Fixtures
+must contain no real conversations, credentials, tokens, cookies, names, or other
+personal data.
+
+**Required pre-production gate:** validate both adapters against sanitized current
+ChatGPT and Claude account exports before claiming production compatibility.
+Record the export date, sanitization method, retained structural cases, and results;
+replace all personal content and identifiers before any fixture is committed.
+Retain the synthetic fixtures as adversarial units. Export-help pages and third-party
+readers are references, not substitutes for this gate or vendor schema guarantees.
 
 **ChatGPT:** top-level array; each conversation has `id` and/or `conversation_id`,
 `title`, epoch-second `create_time`/`update_time`, `current_node`, and a `mapping`
@@ -88,18 +99,22 @@ nodes). Messages have `id`, `author.role`, optional times, and `content` with a
 `current_node` ancestry is emitted from root to leaf; the complete graph is
 validated first. Cycles, missing parents, multiple roots, inconsistent edges,
 duplicate messages, and invalid abandoned nodes reject the conversation. Valid
-abandoned branches are omitted and reported as partial. Wide graphs use linear
-membership/ancestry checks.
+abandoned branches are omitted and reported as partial. Graphs use linear
+membership/ancestry checks. For a graph of `n` nodes, each children collection and
+the global edge total are bounded by `n - 1` before traversing or allocating that
+collection. Oversized collections or totals reject before processing their edges.
 
-ChatGPT `user`, `assistant`, `system`, and `tool` roles are preserved **only as
-archival data**. Other roles reject. `text` accepts strings; `multimodal_text`
+Only ChatGPT `user` and `assistant` dialogue is emitted. `system` and `tool`
+messages are omitted, counted as skipped/unsupported, and make the conversation
+partial; their text and payloads are absent from the import result. Other roles
+reject. `text` accepts strings; `multimodal_text`
 retains strings and skips typed media. Other nonblank content types are omitted.
 Attachment/file/citation/content-reference metadata is counted but never copied.
+Message metadata must be absent, null, or a plain object; arrays, strings,
+primitives, and exotic prototypes reject with `INVALID_CONTENT`.
 
-Sources: [OpenAI account-export transfer instructions](https://help.openai.com/en/articles/9106926-transfer-exported-conversations-between-chatgpt-accounts)
-confirm `conversations.json` and numbered shards;
-[observed mapping format](https://github.com/willificent/chatgpt-lcm-migration/blob/main/docs/chatgpt-export-format.md)
-describes the account-export graph. These are not a vendor schema guarantee.
+References: [OpenAI account-export transfer instructions](https://help.openai.com/en/articles/9106926-transfer-exported-conversations-between-chatgpt-accounts)
+and [third-party mapping notes](https://github.com/willificent/chatgpt-lcm-migration/blob/main/docs/chatgpt-export-format.md).
 
 **Claude:** top-level array; conversations have `uuid`, `name`, ISO-8601
 `created_at`/`updated_at`, and `chat_messages`. Messages have `uuid`, `sender`,
@@ -110,11 +125,10 @@ Absent/empty content falls back to the legacy `text` string. Unsupported-only
 messages retain their identity with empty parts; fallback never resurrects tool
 or thinking content. Attachments/files/citations are counted and skipped.
 
-Sources: [Anthropic export instructions](https://support.claude.com/en/articles/9450526-export-your-claude-data)
-confirm conversation/account exports;
-[account-export reader models](https://github.com/davehaas/claudeExplorer/blob/main/ClaudeExplorer/Models.swift)
+References: [Anthropic export instructions](https://support.claude.com/en/articles/9450526-export-your-claude-data),
+[third-party reader models](https://github.com/davehaas/claudeExplorer/blob/main/ClaudeExplorer/Models.swift),
 and [array loader](https://github.com/davehaas/claudeExplorer/blob/main/ClaudeExplorer/DataLoader.swift)
-document the observed shape. Browser/API response objects are not supported.
+implementation. Browser/API response objects are not supported.
 
 Missing timestamps become null with a warning and partial quality. Invalid dates,
 roles, or required text reject the record. ISO offsets normalize to UTC; fractional
@@ -149,14 +163,16 @@ The integration owner must:
 4. Recheck cancellation before committing and roll back any failure. This library
    has no database handle, so persistence idempotency/transactions remain an
    integration responsibility.
-5. Render every title/text part as untrusted text. Do not feed imported `system`
-   or `tool` roles directly into live agent messages, invoke tools, execute HTML,
-   or automatically open URLs. `UNSAFE_URL` is advisory, not a URL sanitizer.
+5. Render every title/text part as untrusted text. Never interpret imported text
+   as live agent instructions, invoke tools, execute HTML, or automatically open
+   URLs. `UNSAFE_URL` is advisory, not a URL sanitizer.
 6. Preserve the conversation's memory policy through persistence and search.
    Imported-message insertions must not enqueue the durable-memory extractor.
    Re-imports, branch updates, and retrieved historical context do not count as
-   new activity originating inside Jarvis. Enforce this at the integration boundary;
-   the importer cannot enforce a queue policy in shared code it does not own.
+   new activity originating inside Jarvis. Add integration tests proving
+   persistence/search preserve the encoded policy and these operations never queue
+   or invoke memory extraction. The importer only encodes the policy; this PR
+   neither implements nor verifies those cross-layer guarantees.
 
 Updated history with missing/changed source IDs cannot be matched reliably and
 is not guessed. Account/auth/cookie/token fields, arbitrary metadata, raw source
@@ -199,7 +215,7 @@ Future review/activation must bind its separate approval to that current revisio
 Every output item has `enabled: false`. Hooks have `activation: 'disabled'`;
 plugins/MCP have `activation: 'requires-explicit-review'`; other assets remain
 `not-activated`. Project memories additionally carry `memoryUse:
-'project-reference-only'`. The plan's memory policy excludes automatic extraction.
+'project-reference-only'`. The plan encodes `exclude-from-automatic-memory`.
 These are integration requirements, not an implemented installer or authorization
 service; selection alone must never be used to start an executable component.
 
@@ -249,6 +265,7 @@ bounded inflation or JSON parse. Large imports should run in an integration work
 | JSON object/array depth | 64 |
 | Conversations, including duplicates/rejections | 5,000 |
 | Total messages / ChatGPT graph nodes, including omitted nodes | 100,000 |
+| Each ChatGPT children collection / total edges in one graph | Node count minus one |
 | Each decoded JSON string / emitted text | 1,048,576 UTF-16 units |
 | All decoded JSON strings, including keys and ignored metadata | 16,777,216 UTF-16 units |
 
@@ -287,8 +304,11 @@ Strict test-first cycles covered validation, both adapters, canonical identity,
 resource bounds, archive structure, graph integrity, and review regressions.
 Tests use synthetic JSON and generated ZIPs. Cross-layer checks compare ZIP/JSON
 canonical results, repeated imports, updated exports, shards, invalid ignored
-artifacts, and cancellation with no partial results. A graph regression exercises
-the 100,000-node ceiling to catch quadratic sibling validation.
-Additional test-first cases cover non-overridable history memory policy, setup
+artifacts, and cancellation with no partial results. Graph regressions use
+deterministic operation/edge bounds instead of wall-clock correctness thresholds.
+They check children limits before iteration/allocation and a global edge budget.
+Additional test-first cases cover non-overridable history memory-policy encoding, setup
 selection by revision, disabled hooks, plugin/MCP review requirements, rejected
 credential/executable fields, scoped identities, and inert project-memory references.
+These tests do not verify persistence, search, queue, or memory-extractor enforcement.
+Current real-export compatibility remains the required pre-production gate above.

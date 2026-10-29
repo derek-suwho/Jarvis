@@ -143,6 +143,61 @@ describe('provider-neutral import preview', () => {
     expect(await preview(fixture(), { provider: 'claude' })).toMatchObject({ status: 'rejected', rejections: [{ code: 'PROVIDER_MISMATCH' }] });
   });
 
+  it.each([[], [{ unrelated: true }], Array.from({ length: 4 }, () => ({ unrelated: true }))].map(value => [value]))(
+    'ignores unrelated ChatGPT chat_messages extensions: %j', async chat_messages => {
+      const original = await preview(fixture());
+      const result = await preview([{ ...fixture()[0], chat_messages }], { limits: { maxMessages: 3 } });
+      expect(result).toMatchObject({ status: 'ready', provider: 'chatgpt', rejections: [] });
+      expect(result.conversations).toEqual(original.conversations);
+    },
+  );
+
+  it('ignores unrelated Claude mapping extensions without charging their nodes', async () => {
+    const original = await preview(claude());
+    const result = await preview([{ ...claude()[0], mapping: { extension: {}, another: {} } }], { limits: { maxMessages: 1 } });
+    expect(result).toMatchObject({ status: 'ready', provider: 'claude', rejections: [] });
+    expect(result.conversations).toEqual(original.conversations);
+  });
+
+  it('requires adapter validation before treating extension fields as a second provider', async () => {
+    const original = await preview(fixture());
+    const extension = { ...claude()[0], chat_messages: [{ ...claude()[0].chat_messages[0], sender: 'extension' }] };
+    const result = await preview([{ ...fixture()[0], ...extension }]);
+    expect(result).toMatchObject({ status: 'ready', provider: 'chatgpt', rejections: [] });
+    expect(result.conversations).toEqual(original.conversations);
+  });
+
+  it('retains precise validation errors when no candidate imports successfully', async () => {
+    const values = fixture();
+    values[0].mapping['answer-node'].message.author.role = 'invalid';
+    expect(await preview(values)).toMatchObject({
+      status: 'rejected', provider: 'chatgpt', conversations: [],
+      rejections: [{ code: 'INVALID_ROLE', recordIndex: 0 }],
+    });
+  });
+
+  it.each([{ mapping: {} }, { chat_messages: [] }])('does not infer a provider from an incidental collection: %j', async value => {
+    expect(await preview([value])).toMatchObject({
+      status: 'rejected', provider: null, rejections: [{ code: 'UNSUPPORTED_FORMAT' }],
+    });
+  });
+
+  it('counts malformed neighbors against the selected provider message budget', async () => {
+    const malformed = { ...fixture()[0], title: null, id: 'malformed', conversation_id: 'malformed' };
+    expect(await preview([...fixture(), malformed], { limits: { maxMessages: 3 } })).toMatchObject({
+      status: 'rejected', conversations: [], rejections: [{ code: 'LIMIT_EXCEEDED' }],
+    });
+  });
+
+  it('rejects a record validated by both adapters even with an explicit provider', async () => {
+    const hybrid = [{ ...fixture()[0], ...claude()[0] }];
+    for (const provider of ['chatgpt', 'claude'] as const) {
+      expect(await preview(hybrid, { provider })).toMatchObject({
+        status: 'rejected', conversations: [], rejections: [{ code: 'AMBIGUOUS_PROVIDER' }],
+      });
+    }
+  });
+
   it('rejects invalid UTF-8 and ambiguous duplicate JSON keys, including escaped keys', async () => {
     expect(await run(new Uint8Array([0xff]))).toMatchObject({ status: 'rejected', rejections: [{ code: 'INVALID_ENCODING' }] });
     const json = JSON.stringify(fixture()).replace('"id":"chat-synthetic-1"', '"id":"other","\\u0069d":"chat-synthetic-1"');

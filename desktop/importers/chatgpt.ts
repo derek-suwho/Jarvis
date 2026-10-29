@@ -1,9 +1,15 @@
 import type { ParsedConversation, ParsedMessage } from './adapter-types';
-import type { ImportLimits, ImportRole } from './types';
+import type { ImportLimits } from './types';
 import { boundedText, RecordError, sourceId, timestamp } from './validation';
 
 function object(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function plainObject(value: unknown): value is Record<string, unknown> {
+  if (!object(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
 }
 
 interface Node {
@@ -36,15 +42,26 @@ export function parseChatGPT(value: unknown, limits: ImportLimits): ParsedConver
   const entries = Object.entries(value.mapping);
   if (entries.length > limits.maxMessages) throw new RecordError('LIMIT_EXCEEDED');
   if (!entries.length) throw new RecordError('GRAPH_DISCONNECTED');
+  // A rooted tree has exactly nodes - 1 edges. Bound allocation before reading children.
+  const maxEdges = entries.length - 1;
+  let edgeCount = 0;
 
   for (const [key, raw] of entries) {
     sourceId(key);
     if (!object(raw) || sourceId(raw.id) !== key || !Array.isArray(raw.children)) {
       throw new RecordError('GRAPH_INCONSISTENT');
     }
+    if (raw.children.length > maxEdges || raw.children.length > maxEdges - edgeCount) {
+      throw new RecordError('LIMIT_EXCEEDED');
+    }
+    edgeCount += raw.children.length;
     const parent = raw.parent === null ? null : sourceId(raw.parent);
-    const children = new Set(raw.children.map(sourceId));
-    if (children.size !== raw.children.length) throw new RecordError('GRAPH_INCONSISTENT');
+    const children = new Set<string>();
+    for (const child of raw.children) {
+      const id = sourceId(child);
+      if (children.has(id)) throw new RecordError('GRAPH_INCONSISTENT');
+      children.add(id);
+    }
     let message: ParsedMessage | null = null;
     if (raw.message !== null) {
       if (!object(raw.message)) throw new RecordError('INVALID_RECORD');
@@ -59,9 +76,11 @@ export function parseChatGPT(value: unknown, limits: ImportLimits): ParsedConver
       if (!object(rawMessage.content) || typeof rawMessage.content.content_type !== 'string' || !rawMessage.content.content_type.trim()) {
         throw new RecordError('INVALID_CONTENT');
       }
-      if (object(rawMessage.metadata)) {
+      const metadata = rawMessage.metadata;
+      if (metadata !== undefined && metadata !== null) {
+        if (!plainObject(metadata)) throw new RecordError('INVALID_CONTENT');
         for (const key of ['attachments', 'files', 'citations', 'content_references']) {
-          const artifacts = rawMessage.metadata[key];
+          const artifacts = metadata[key];
           if (artifacts === undefined || artifacts === null) continue;
           if (!Array.isArray(artifacts)) throw new RecordError('INVALID_CONTENT');
           if (artifacts.length) {
@@ -88,10 +107,14 @@ export function parseChatGPT(value: unknown, limits: ImportLimits): ParsedConver
         warnings.add('UNSUPPORTED_CONTENT');
         skippedArtifacts++;
       }
-      message = {
-        sourceId: messageId, nodeId: key, role: rawMessage.author.role as ImportRole,
-        createdAt: readTime(rawMessage.create_time), parts,
-      };
+      const createdAt = readTime(rawMessage.create_time);
+      const role = rawMessage.author.role;
+      if (role === 'user' || role === 'assistant') {
+        message = { sourceId: messageId, nodeId: key, role, createdAt, parts };
+      } else {
+        warnings.add('UNSUPPORTED_CONTENT');
+        skippedArtifacts++;
+      }
     }
     nodes.set(key, { parent, children, message });
   }

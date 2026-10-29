@@ -123,6 +123,33 @@ function checkCancellation(signal?: AbortSignal): void {
   if (signal?.aborted) throw new RecordError('CANCELLED');
 }
 
+function providerCandidates(record: unknown, limits: ImportLimits): Provider[] {
+  if (!object(record)) return [];
+  const candidates: Provider[] = [];
+  if (object(record.mapping) && typeof record.title === 'string' && Object.hasOwn(record, 'current_node')) {
+    candidates.push('chatgpt');
+  }
+  if (Array.isArray(record.chat_messages) && typeof record.name === 'string' && Object.hasOwn(record, 'uuid')) {
+    candidates.push('claude');
+  }
+  if (candidates.length < 2) return candidates;
+
+  // Overlapping core fields may be unrelated extensions. Only two successful
+  // adapters establish ambiguity; a failed candidate cannot veto a valid one.
+  const validated = candidates.filter(provider => {
+    try {
+      (provider === 'chatgpt' ? parseChatGPT : parseClaude)(record, limits);
+      return true;
+    } catch (error) {
+      if (!(error instanceof RecordError)) throw error;
+      return false;
+    }
+  });
+  // Retain malformed core shapes so the selected adapter can report precise
+  // validation errors and reject aliases shared with an otherwise valid twin.
+  return validated.length ? validated : candidates;
+}
+
 /** Pure preview only. Consumers must render as untrusted text and persist transactionally. */
 export async function importProviderHistory(input: string | Uint8Array, options: ImportOptions = {}): Promise<ImportResult> {
   const result = emptyResult();
@@ -153,23 +180,24 @@ export async function importProviderHistory(input: string | Uint8Array, options:
       for (const record of document) records.push(record);
     }
     const providers = new Set<Provider>();
-    let messageCount = 0;
     for (const record of records) {
-      if (!object(record)) continue;
-      if (object(record.mapping)) {
-        providers.add('chatgpt');
-        messageCount += Object.keys(record.mapping).length;
+      await yieldTurn();
+      checkCancellation(options.signal);
+      for (const candidate of providerCandidates(record, limits)) {
+        providers.add(candidate);
       }
-      if (Array.isArray(record.chat_messages)) {
-        providers.add('claude');
-        messageCount += record.chat_messages.length;
-      }
-      if (messageCount > limits.maxMessages) throw new RecordError('LIMIT_EXCEEDED');
+      if (providers.size > 1) throw new RecordError('AMBIGUOUS_PROVIDER');
     }
-    if (providers.size > 1) throw new RecordError('AMBIGUOUS_PROVIDER');
     const provider = providers.values().next().value;
     if (!provider) throw new RecordError('UNSUPPORTED_FORMAT');
     if (options.provider !== undefined && options.provider !== provider) throw new RecordError('PROVIDER_MISMATCH');
+    let messageCount = 0;
+    for (const record of records) {
+      if (!object(record)) continue;
+      if (provider === 'chatgpt' && object(record.mapping)) messageCount += Object.keys(record.mapping).length;
+      if (provider === 'claude' && Array.isArray(record.chat_messages)) messageCount += record.chat_messages.length;
+      if (messageCount > limits.maxMessages) throw new RecordError('LIMIT_EXCEEDED');
+    }
     result.provider = provider;
     result.format = provider === 'chatgpt' ? 'chatgpt-mapping' : 'claude-chat-messages';
     const parser = provider === 'chatgpt' ? parseChatGPT : parseClaude;
