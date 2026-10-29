@@ -7,9 +7,10 @@ export interface Preferences {
   theme: Theme;
   /** Custom instructions applied to every new chat, like ChatGPT/Claude personalization. */
   instructions: string;
+  desktopTaskNotifications: boolean;
 }
 
-export const DEFAULT_PREFERENCES: Preferences = { name: '', theme: 'dark', instructions: '' };
+export const DEFAULT_PREFERENCES: Preferences = { name: '', theme: 'dark', instructions: '', desktopTaskNotifications: true };
 
 const STORAGE_KEY = 'jarvis.preferences';
 const NAME_MAX = 40;
@@ -21,6 +22,7 @@ export function sanitizePreferences(value: unknown): Preferences {
     name: typeof v.name === 'string' ? v.name.slice(0, NAME_MAX) : '',
     theme: THEMES.includes(v.theme as Theme) ? (v.theme as Theme) : DEFAULT_PREFERENCES.theme,
     instructions: typeof v.instructions === 'string' ? v.instructions.slice(0, INSTRUCTIONS_MAX) : '',
+    desktopTaskNotifications: typeof v.desktopTaskNotifications === 'boolean' ? v.desktopTaskNotifications : true,
   };
 }
 

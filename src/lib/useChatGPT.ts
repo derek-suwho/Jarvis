@@ -6,12 +6,12 @@ export type ChatGPTState =
   | { phase: 'loading' }
   | { phase: 'signing-in' }
   | { phase: 'signed-out'; registered: boolean; error?: string }
-  | { phase: 'connected'; email: string | null; notice?: string };
+  | { phase: 'connected'; name?: string | null; email: string | null; notice?: string };
 
 const WELCOME_KEY = 'jarvis.chatgptWelcomeSeen';
 
 function fromStatus(s: ChatGPTStatus): ChatGPTState {
-  return s.connected ? { phase: 'connected', email: s.email } : { phase: 'signed-out', registered: s.registered };
+  return s.connected ? { phase: 'connected', name: s.name ?? null, email: s.email } : { phase: 'signed-out', registered: s.registered };
 }
 
 function welcomeSeen(): boolean {

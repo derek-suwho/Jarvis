@@ -9,8 +9,10 @@ describe('preferences', () => {
       name: '',
       theme: 'dark',
       instructions: 'Be brief',
+      desktopTaskNotifications: true,
     });
     expect(sanitizePreferences(null).theme).toBe('dark');
+    expect(sanitizePreferences({ desktopTaskNotifications: false }).desktopTaskNotifications).toBe(false);
   });
 
   it('greets by time of day and first name', () => {

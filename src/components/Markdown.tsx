@@ -1,8 +1,22 @@
 import { Fragment, useMemo } from 'react';
+import katex from 'katex';
+import 'katex/dist/katex.min.css';
 import type { Block, Inline } from '../lib/markdown';
 import { parseMarkdown } from '../lib/markdown';
+import { artifactKind } from '../lib/artifacts';
+import { Artifact } from './Artifact';
 import { useCopy } from './useCopy';
 import { CheckIcon, CopyIcon } from './Icons';
+
+/** KaTeX output; with `trust` off it escapes input and allows no links, scripts or styles from the TeX. */
+function TeX({ tex, display }: { tex: string; display: boolean }) {
+  const html = useMemo(
+    () => katex.renderToString(tex, { displayMode: display, throwOnError: false, output: 'htmlAndMathml', trust: false }),
+    [tex, display],
+  );
+  const Tag = display ? 'div' : 'span';
+  return <Tag className={display ? 'md-math-display' : 'md-math'} dangerouslySetInnerHTML={{ __html: html }} />;
+}
 
 function Inlines({ items }: { items: Inline[] }) {
   return (
@@ -13,6 +27,8 @@ function Inlines({ items }: { items: Inline[] }) {
             return <Fragment key={i}>{n.text}</Fragment>;
           case 'code':
             return <code key={i}>{n.text}</code>;
+          case 'math':
+            return <TeX key={i} tex={n.tex} display={n.display} />;
           case 'strong':
             return (
               <strong key={i}>
@@ -60,8 +76,23 @@ function Blocks({ blocks }: { blocks: Block[] }) {
     <>
       {blocks.map((b, i) => {
         switch (b.kind) {
-          case 'code':
-            return <CodeBlock key={i} lang={b.lang} text={b.text} />;
+          case 'code': {
+            const kind = artifactKind(b.lang, b.text);
+            return kind ? (
+              <Artifact key={i} kind={kind} text={b.text} streaming={!!b.open} />
+            ) : (
+              <CodeBlock key={i} lang={b.lang} text={b.text} />
+            );
+          }
+          case 'math':
+            // A formula still streaming in shows as its source until the closer arrives.
+            return b.open ? (
+              <p key={i} className="md-math-pending">
+                {b.tex}
+              </p>
+            ) : (
+              <TeX key={i} tex={b.tex} display />
+            );
           case 'heading': {
             const H = `h${Math.min(b.level + 1, 6)}` as 'h2';
             return (

@@ -1,6 +1,8 @@
 import type { Message, ToolUse } from './chats';
 import { newId } from './chats';
 import type { ChatGPTModel, ClaudeStreamPayload, StreamBridge } from './desktop';
+import { buildReplyHistory } from './replyContext';
+import type { ReplyMessage } from './replyContext';
 
 interface ReplyTarget {
   /** Model slug sent to the Responses API. */
@@ -9,6 +11,8 @@ interface ReplyTarget {
   label: string;
   /** Conversation so far, oldest first, ending with the new user message. */
   history: Message[];
+  /** Personal and project instructions, supplied as explicit user context. */
+  instructions?: string;
   append: (msg: Message) => void;
   update: (id: string, patch: { content: string; tools?: ToolUse[] }) => void;
   /** Called once when the first text or tool activity arrives. */
@@ -46,11 +50,12 @@ export function streamClaudeReply(
 
 /** A real provider reply: which provider, model slug, and the conversation to send (ending with the prompt). */
 export type LiveReply =
-  | { provider: 'chatgpt'; slug: string; history: Message[] }
+  | { provider: 'chatgpt' | 'gemini' | 'grok'; slug: string; history: Message[]; instructions?: string }
   | {
       provider: 'claude';
       slug: string;
       history: Message[];
+      instructions?: string;
       mode: 'chat' | 'code';
       reasoning: string;
       conversationId: string;
@@ -58,17 +63,18 @@ export type LiveReply =
 
 /** Streams a reply from whichever provider `live` names. */
 export function streamLive(live: LiveReply, t: Omit<ReplyTarget, 'model' | 'history'>): () => void {
-  const target = { ...t, model: live.slug, history: live.history };
+  const target = { ...t, model: live.slug, history: live.history, instructions: live.instructions };
+  if (live.provider === 'gemini' || live.provider === 'grok') {
+    return streamLiveReply(window.jarvis?.[live.provider], (messages) => ({ model: live.slug, messages }), target, live.provider === 'gemini' ? 'Gemini' : 'Grok');
+  }
   return live.provider === 'claude'
     ? streamClaudeReply({ ...target, mode: live.mode, reasoning: live.reasoning, conversationId: live.conversationId })
     : streamChatGPTReply(target);
 }
 
-type WireMessage = { role: 'user' | 'assistant'; content: string };
-
 function streamLiveReply<P>(
   bridge: StreamBridge<P> | undefined,
-  payload: (messages: WireMessage[]) => P,
+  payload: (messages: ReplyMessage[]) => P,
   t: ReplyTarget,
   provider: string,
 ): () => void {
@@ -76,6 +82,15 @@ function streamLiveReply<P>(
     t.append({ id: newId(), role: 'assistant', content: message, model: t.label, error: true });
   if (!bridge) {
     fail(`${provider} is only available in the Jarvis desktop app.`);
+    t.onSettled();
+    return () => {};
+  }
+
+  let messages: ReplyMessage[];
+  try {
+    messages = buildReplyHistory(t.history, t.instructions);
+  } catch (error) {
+    fail(error instanceof Error ? error.message : 'Could not prepare this conversation.');
     t.onSettled();
     return () => {};
   }
@@ -107,8 +122,6 @@ function streamLiveReply<P>(
     t.onSettled();
     return true;
   };
-  const messages = t.history.filter((m) => !m.error).map(({ role, content }) => ({ role, content }));
-
   const off = bridge.onStreamEvent((id, event) => {
     if (id !== requestId) return;
     if (settled) return;

@@ -120,3 +120,17 @@ describe('token lifetimes', () => {
     expect(oauth.grantedScopes({ scopes: ['a'] })).toEqual(['a']);
   });
 });
+
+describe('profile name claims', () => {
+  it('reads the full name and standard name components', () => {
+    expect(oauth.profileName({ name: '  Alex Example  ', given_name: 'Alex' })).toBe('Alex Example');
+    expect(oauth.profileName({ given_name: 'Alex', family_name: ' Example ' })).toBe('Alex Example');
+    expect(oauth.profileName({ given_name: 'Alex' })).toBe('Alex');
+  });
+
+  it('ignores malformed or missing metadata and caps display length', () => {
+    expect(oauth.profileName(null)).toBeNull();
+    expect(oauth.profileName({ name: {}, given_name: 123, family_name: ' ' })).toBeNull();
+    expect(oauth.profileName({ name: 'A'.repeat(200) })).toHaveLength(120);
+  });
+});

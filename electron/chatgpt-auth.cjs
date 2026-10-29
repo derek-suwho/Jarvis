@@ -75,8 +75,19 @@ async function validateIdToken(idToken, { clientId, nonce }) {
 
 function publicStatus(record) {
   const connected = !!record?.refresh_token && !oauth.refreshExpired(record);
+  let name = oauth.profileName(record);
+  // Existing installations already saved this token after validating sign-in. Recover its
+  // display metadata without requiring another login; no token is sent to the renderer.
+  if (!name && record?.id_token) {
+    try {
+      name = oauth.profileName(oauth.decodeJwt(record.id_token).payload);
+    } catch {
+      // Older or malformed records can still fall back to email in the interface.
+    }
+  }
   return {
     connected,
+    name,
     email: record?.email ?? null,
     // A saved registration means "Continue with ChatGPT" reuses the same client.
     registered: !!record?.client_id,
@@ -194,6 +205,7 @@ async function exchangeCode({ code, clientId, verifier, redirectUri, nonce, host
   }
   const now = new Date().toISOString();
   const record = {
+    name: oauth.profileName(claims),
     email: claims.email ?? null,
     issuer: oauth.ISSUER,
     subject: claims.sub,
@@ -212,10 +224,11 @@ async function exchangeCode({ code, clientId, verifier, redirectUri, nonce, host
   return record;
 }
 
-/** Keeps the registration (client ID, email) for re-sign-in but drops every token. */
+/** Keeps the registration and display identity for re-sign-in but drops every token. */
 function clearTokens(record) {
   const { client_id, email, subject, ext_agent_host_id } = record;
-  writeJson(credFile(), { client_id, email, subject, ext_agent_host_id });
+  const { name } = publicStatus(record);
+  writeJson(credFile(), { client_id, name, email, subject, ext_agent_host_id });
 }
 
 let refreshing = null;
@@ -237,8 +250,17 @@ function refresh() {
     }
     const t = res.json;
     const now = new Date().toISOString();
+    let name = publicStatus(record).name;
+    if (t.id_token) {
+      try {
+        name = oauth.profileName(oauth.decodeJwt(t.id_token).payload) ?? name;
+      } catch {
+        // Profile metadata is optional; preserve the last known display name.
+      }
+    }
     const next = {
       ...record,
+      name,
       access_token: t.access_token,
       refresh_token: t.refresh_token ?? record.refresh_token,
       id_token: t.id_token ?? record.id_token,

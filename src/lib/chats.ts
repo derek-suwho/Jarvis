@@ -1,50 +1,7 @@
-export type Role = 'user' | 'assistant';
-export type Feedback = 'up' | 'down';
-
-export interface Attachment {
-  id: string;
-  name: string;
-  size: number;
-  type: string;
-  /** Data URL kept only for small images so the thumbnail survives reloads. */
-  preview?: string;
-}
-
-/** One tool call made while writing a reply (MCP server tool, skill, or Claude Code built-in). */
-export interface ToolUse {
-  id: string;
-  /** Server or source shown to the user, e.g. "context7" or "Skills". */
-  server: string;
-  tool: string;
-  /** Short argument summary, e.g. the skill being loaded. */
-  detail?: string;
-  status: 'running' | 'done' | 'error';
-}
-
-export interface Message {
-  id: string;
-  role: Role;
-  content: string;
-  model?: string;
-  /** A failed reply; shown but never sent back to a model as context. */
-  error?: boolean;
-  attachments?: Attachment[];
-  feedback?: Feedback;
-  /** Tool calls made for this reply, in order. */
-  tools?: ToolUse[];
-}
-
-export interface Chat {
-  id: string;
-  title: string;
-  messages: Message[];
-  updatedAt: number;
-  pinned?: boolean;
-  archived?: boolean;
-  projectId?: string;
-  /** Temporary chats never reach storage or the sidebar. */
-  temporary?: boolean;
-}
+import { pruneMedia, readMedia, writeMedia } from './mediaStore';
+import type { StoredMedia } from './mediaStore';
+import type { Attachment, Chat, Feedback, Message, Role, ToolUse } from '../shared/chatTypes';
+export type { Attachment, Chat, Feedback, Message, Role, ToolUse } from '../shared/chatTypes';
 
 const STORAGE_KEY = 'jarvis.chats';
 const TITLE_MAX = 40;
@@ -155,21 +112,178 @@ function isChat(v: unknown): v is Chat {
   return !!c && typeof c.id === 'string' && typeof c.title === 'string' && Array.isArray(c.messages);
 }
 
-export function loadChats(): Chat[] {
+const mediaCache = new Map<string, StoredMedia>();
+const persistedMediaIds = new Set<string>();
+const storageErrorListeners = new Set<(message: string) => void>();
+let pendingStorageError: string | null = null;
+type PendingSave = { chats: Chat[]; resolve: (() => void)[]; reject: ((error: unknown) => void)[] };
+let pendingSave: PendingSave | undefined;
+let saving = false;
+let lastRetainedMediaIds: Set<string> | undefined;
+
+function storageError(message: string): void {
+  if (storageErrorListeners.size) {
+    for (const listener of storageErrorListeners) listener(message);
+  } else {
+    pendingStorageError = message;
+  }
+}
+
+/** Also delivers restore failures that occurred before React mounted. */
+export function subscribeToChatStorageErrors(listener: (message: string) => void): () => void {
+  storageErrorListeners.add(listener);
+  if (pendingStorageError) {
+    const message = pendingStorageError;
+    pendingStorageError = null;
+    listener(message);
+  }
+  return () => { storageErrorListeners.delete(listener); };
+}
+
+const normalizedMediaType = (type: string) => type === 'image/jpg' ? 'image/jpeg' : type;
+const imageType = (type: string) => /^image\/(png|jpeg|gif|webp)$/.test(normalizedMediaType(type));
+const mediaType = (type: string) => type === 'application/pdf' || imageType(type);
+
+/** Old chats may contain only a complete image data URL. Preserve it during migration. */
+function inlineMedia(attachment: Attachment): StoredMedia | undefined {
+  if (!mediaType(attachment.type)) return undefined;
+  const type = normalizedMediaType(attachment.type);
+  if (attachment.data) return { id: attachment.id, type, data: attachment.data };
+  const preview = attachment.preview;
+  const prefix = [`data:${attachment.type};base64,`, `data:${type};base64,`]
+    .find((value) => preview?.startsWith(value));
+  if (imageType(type) && prefix && preview) {
+    return { id: attachment.id, type, data: preview.slice(prefix.length) };
+  }
+  return undefined;
+}
+
+function readChatMetadata(): Chat[] {
   try {
     const parsed: unknown = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]');
-    return Array.isArray(parsed) ? parsed.filter(isChat) : [];
+    return Array.isArray(parsed) ? parsed.filter(isChat).filter((chat) => !chat.temporary) : [];
   } catch {
     return [];
   }
 }
 
-export function saveChats(chats: Chat[]): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(chats.filter((c) => !c.temporary)));
-  } catch {
-    // Storage unavailable (private mode, quota) — keep in memory only.
+/** Load saved bytes before the first chat render; a missing file remains an explicit unavailable attachment. */
+export async function initializeChatMedia(): Promise<void> {
+  const attachments = readChatMetadata().flatMap((chat) => chat.messages.flatMap((message) => message.attachments ?? []));
+  const missingIds: string[] = [];
+  for (const attachment of attachments) {
+    const inline = inlineMedia(attachment);
+    if (inline) mediaCache.set(attachment.id, inline);
+    else if (mediaType(attachment.type)) missingIds.push(attachment.id);
   }
+  try {
+    for (const row of await readMedia(missingIds)) {
+      const type = normalizedMediaType(row.type);
+      mediaCache.set(row.id, { ...row, type });
+      if (type === row.type) persistedMediaIds.add(row.id);
+    }
+    if (missingIds.some((id) => !mediaCache.has(id))) {
+      storageError('Some saved attachments are unavailable. Reattach the original files in a new chat.');
+    }
+  } catch {
+    storageError('Could not restore saved attachments. Reopen Jarvis or reattach the original files in a new chat.');
+  }
+}
+
+export function loadChats(): Chat[] {
+  return readChatMetadata().map((chat) => ({
+    ...chat,
+    messages: chat.messages.map((message) => ({
+      ...message,
+      ...(message.attachments ? {
+        attachments: message.attachments.map((attachment) => {
+          const media = inlineMedia(attachment) ?? mediaCache.get(attachment.id);
+          if (!media || media.type !== normalizedMediaType(attachment.type)) return attachment;
+          return {
+            ...attachment,
+            type: media.type,
+            data: media.data,
+            ...(imageType(media.type) ? { preview: `data:${media.type};base64,${media.data}` } : {}),
+          };
+        }),
+      } : {}),
+    })),
+  }));
+}
+
+/** Serialized saves preserve ordering and never put media bytes in localStorage. */
+async function writeChats(chats: Chat[]): Promise<void> {
+  const rows = new Map<string, StoredMedia>();
+  const retainedIds = new Set<string>();
+  const metadata = chats.filter((chat) => !chat.temporary).map((chat) => ({
+    ...chat,
+    messages: chat.messages.map((message) => ({
+      ...message,
+      ...(message.attachments ? {
+        attachments: message.attachments.map((attachment) => {
+          const media = inlineMedia(attachment);
+          if (media) rows.set(media.id, media);
+          if (mediaType(attachment.type)) retainedIds.add(attachment.id);
+          const { data: _data, preview: _preview, ...details } = attachment;
+          return { ...details, type: normalizedMediaType(details.type) };
+        }),
+      } : {}),
+    })),
+  }));
+  const serialized = JSON.stringify(metadata);
+
+  {
+    const changed = [...rows.values()].filter((row) => {
+      const cached = mediaCache.get(row.id);
+      return !persistedMediaIds.has(row.id) || !cached || cached.type !== row.type || cached.data !== row.data;
+    });
+    // Inline legacy data is cached during startup but has not necessarily reached IndexedDB.
+    await writeMedia(changed);
+    for (const row of rows.values()) persistedMediaIds.add(row.id);
+    localStorage.setItem(STORAGE_KEY, serialized);
+    for (const row of rows.values()) mediaCache.set(row.id, row);
+    const previousRetainedIds = lastRetainedMediaIds;
+    if (!previousRetainedIds || previousRetainedIds.size !== retainedIds.size
+      || [...retainedIds].some((id) => !previousRetainedIds.has(id))) {
+      await pruneMedia(retainedIds);
+      lastRetainedMediaIds = retainedIds;
+    }
+    for (const id of mediaCache.keys()) {
+      if (!retainedIds.has(id)) mediaCache.delete(id);
+    }
+    for (const id of persistedMediaIds) {
+      if (!retainedIds.has(id)) persistedMediaIds.delete(id);
+    }
+  }
+}
+
+/** Coalesce pending checkpoints; receipts resolve only after media and metadata are durable. */
+export function saveChats(chats: Chat[]): Promise<void> {
+  const receipt = new Promise<void>((resolve, reject) => {
+    if (pendingSave) {
+      pendingSave.chats = chats;
+      pendingSave.resolve.push(resolve);
+      pendingSave.reject.push(reject);
+    } else pendingSave = { chats, resolve: [resolve], reject: [reject] };
+  });
+  if (!saving) {
+    saving = true;
+    queueMicrotask(async () => {
+      while (pendingSave) {
+        const save = pendingSave;
+        pendingSave = undefined;
+        try {
+          await writeChats(save.chats);
+          save.resolve.forEach((resolve) => resolve());
+        } catch (error) {
+          storageError('Could not save this conversation or its attachments. Keep Jarvis open and free storage space before retrying.');
+          save.reject.forEach((reject) => reject(error));
+        }
+      }
+      saving = false;
+    });
+  }
+  return receipt;
 }
 
 /** Splits a reply into word-sized pieces for the simulated stream, keeping whitespace. */

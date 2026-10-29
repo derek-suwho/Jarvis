@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AUTO_MODEL_ID, DEFAULT_SETTINGS, groupModels, modelLabel } from '../src/lib/models';
+import { AUTO_MODEL_ID, DEFAULT_SETTINGS, groupModels, modelLabel, setAvailableGroups } from '../src/lib/models';
 
 describe('modelLabel', () => {
   it('shows reasoning and fast flag', () => {
@@ -18,5 +18,14 @@ describe('groupModels', () => {
     expect(groups.map((g) => g.group)).toEqual(['Anthropic']);
     expect(groups[0].models.length).toBeGreaterThan(0);
     expect(groupModels('zzz')).toEqual([]);
+  });
+
+  it('lists only added providers', () => {
+    setAvailableGroups(['Anthropic', 'xAI']);
+    expect(groupModels('').map((g) => g.group)).toEqual(['Anthropic', 'xAI']);
+    setAvailableGroups([]);
+    expect(groupModels('')).toEqual([]);
+    setAvailableGroups(null);
+    expect(groupModels('').length).toBe(4);
   });
 });

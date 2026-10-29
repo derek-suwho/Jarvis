@@ -46,7 +46,7 @@ function ClaudeSignOut({ account }: { account: ClaudeAccount }) {
     <div className="connect-actions">
       {armed && <span className="connect-note">Also signs out Terminal</span>}
       <button
-        className="text-btn danger"
+        className="text-btn danger account-action"
         title="Signs out Claude Code on this Mac, including the claude command in Terminal"
         onBlur={() => setArmed(false)}
         onClick={() => {
@@ -65,6 +65,9 @@ function ClaudeSignOut({ account }: { account: ClaudeAccount }) {
 export function ClaudeStatusLine({ account }: { account: ClaudeAccount }) {
   const { state } = account;
   if (state.phase === 'connected') {
+    if (state.notice) {
+      return <span className="connect-error status-text" role="alert" title={state.notice}>{state.notice}</span>;
+    }
     const plan = state.plan ? ` · ${state.plan[0].toUpperCase()}${state.plan.slice(1)}` : '';
     const text = `${state.email ?? 'Connected'}${plan} · Claude Code login on this Mac`;
     return (

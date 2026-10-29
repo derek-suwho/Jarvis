@@ -4,21 +4,23 @@
 const { app } = require('electron');
 const { execFile, spawn } = require('node:child_process');
 const crypto = require('node:crypto');
+const { Buffer } = require('node:buffer');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const timers = require('node:timers');
 const tools = require('./tools/index.cjs');
+const { RENDERING_GUIDE } = require('./rendering-guide.cjs');
+const { validateMessages } = require('./media-input.cjs');
 
 const CHAT_SYSTEM_PROMPT = [
   'You are Claude, chatting with the user inside Jarvis, a desktop chat app.',
   'Be a helpful, thoughtful general-purpose assistant: answer directly, use Markdown when it helps',
   '(headings, lists, tables, fenced code), and match the depth of your answer to the question.',
   'You have no access to the user\'s files or computer in this mode, apart from any tools you are given.',
-].join(' ');
+].join(' ') + `\n\n${RENDERING_GUIDE}`;
 
 const EFFORT = { None: 'low', Low: 'low', Medium: 'medium', High: 'high', 'Extra High': 'xhigh', Max: 'max' };
-const MAX_MESSAGES = 200;
-const MAX_CHARS = 400_000;
 
 let binaryPath = null;
 
@@ -104,29 +106,46 @@ function validateRequest(payload) {
   if (typeof model !== 'string' || !/^[\w.:-]{1,100}$/.test(model)) throw new Error('Invalid model.');
   if (mode !== 'chat' && mode !== 'code') throw new Error('Invalid mode.');
   if (typeof conversationId !== 'string' || !/^[\w-]{1,80}$/.test(conversationId)) throw new Error('Invalid conversation.');
-  if (!Array.isArray(messages) || messages.length === 0 || messages.length > MAX_MESSAGES) {
-    throw new Error('Invalid conversation.');
-  }
-  let total = 0;
-  const clean = messages.map((m) => {
-    if (!m || (m.role !== 'user' && m.role !== 'assistant') || typeof m.content !== 'string') {
-      throw new Error('Invalid message.');
-    }
-    total += m.content.length;
-    return { role: m.role, content: m.content };
-  });
-  if (total > MAX_CHARS) throw new Error('Conversation is too long to send.');
+  const clean = validateMessages(messages);
   if (clean[clean.length - 1].role !== 'user') throw new Error('The last message must be from the user.');
   return { model, mode, effort: EFFORT[reasoning] ?? null, conversationId, messages: clean };
 }
 
 const digest = (messages) => crypto.createHash('sha256').update(JSON.stringify(messages)).digest('hex');
 
+/** Native Claude content; text-only messages retain the original string contract. */
+function messageContent(message) {
+  if (!message.media?.length) return message.content;
+  const content = message.content ? [{ type: 'text', text: message.content }] : [];
+  for (const file of message.media) {
+    const source = { type: 'base64', media_type: file.type, data: file.data };
+    if (file.type === 'application/pdf') {
+      content.push({ type: 'document', title: file.name, source });
+    } else {
+      content.push({ type: 'text', text: `Attached image: ${JSON.stringify(file.name)}` });
+      content.push({ type: 'image', source });
+    }
+  }
+  return content;
+}
+
 /** Prior turns as a transcript, for when Jarvis's history no longer matches a Claude Code session. */
 function transcriptPrompt(messages) {
   const prior = messages.slice(0, -1);
-  const latest = messages[messages.length - 1].content;
+  const latest = messageContent(messages[messages.length - 1]);
   if (prior.length === 0) return latest;
+  if (messages.some((message) => message.media?.length)) {
+    const blocks = [{ type: 'text', text: '<conversation_so_far>\n' }];
+    for (const message of prior) {
+      blocks.push({ type: 'text', text: `<${message.role}>\n` });
+      const content = messageContent(message);
+      blocks.push(...(typeof content === 'string' ? (content ? [{ type: 'text', text: content }] : []) : content));
+      blocks.push({ type: 'text', text: `\n</${message.role}>\n` });
+    }
+    blocks.push({ type: 'text', text: "</conversation_so_far>\n\nContinue the conversation. The user's new message:\n\n" });
+    blocks.push(...(typeof latest === 'string' ? (latest ? [{ type: 'text', text: latest }] : []) : latest));
+    return blocks;
+  }
   const lines = prior.map((m) => `<${m.role}>\n${m.content}\n</${m.role}>`).join('\n');
   return `<conversation_so_far>\n${lines}\n</conversation_so_far>\n\nContinue the conversation. The user's new message:\n\n${latest}`;
 }
@@ -147,20 +166,32 @@ function recordSession(req, sessionId, replyText) {
 /**
  * @param {{ file: string, names: string[] } | null} [mcp] Jarvis's tools layer (see tools/index.cjs), or null when nothing is set up.
  */
-function buildArgs(req, mcp = null) {
+function buildArgs(req, mcp = null, continuation = null) {
   const prior = req.messages.slice(0, -1);
   const cached = sessions.get(req.conversationId);
-  const resume =
-    cached && cached.mode === req.mode && cached.model === req.model && cached.digest === digest(prior) ? cached : null;
+  const resume = continuation || (
+    cached && cached.mode === req.mode && cached.model === req.model && cached.digest === digest(prior) ? cached : null
+  );
   const sessionId = resume ? resume.sessionId : crypto.randomUUID();
-  const prompt = resume ? req.messages[req.messages.length - 1].content : transcriptPrompt(req.messages);
+  const content = continuation ? continuation.content : (
+    resume ? messageContent(req.messages[req.messages.length - 1]) : transcriptPrompt(req.messages)
+  );
+  const prompt = typeof content === 'string' ? content : JSON.stringify({
+    type: 'user',
+    parent_tool_use_id: null,
+    message: { role: 'user', content },
+  }) + '\n';
 
   const args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--model', req.model];
+  if (typeof content !== 'string') args.push('--input-format', 'stream-json');
   args.push(...(resume ? ['--resume', sessionId] : ['--session-id', sessionId]));
   if (req.effort) args.push('--effort', req.effort);
   if (req.mode === 'chat') {
     // Plain chat: Jarvis's system prompt, no built-in tools, and none of the user's hooks or CLAUDE.md.
     args.push('--system-prompt', CHAT_SYSTEM_PROMPT, '--tools', '', '--setting-sources', '');
+  } else {
+    // Code mode keeps Claude Code's own prompt; its replies still show in Jarvis's chat.
+    args.push('--append-system-prompt', RENDERING_GUIDE);
   }
   if (mcp) {
     // Jarvis's imported servers and skills; chat mode sees only these, code mode adds them to the user's own.
@@ -192,86 +223,273 @@ function toolEvents(e, labelTool) {
   return [];
 }
 
-async function streamResponse(payload, emit, signal) {
-  let req;
-  try {
-    req = validateRequest(payload);
-  } catch (err) {
-    emit({ type: 'error', message: err.message });
-    return;
-  }
-  const bin = await findClaude();
-  if (!bin) {
-    emit({ type: 'error', message: 'Claude Code is not installed, so Jarvis cannot reach Claude.' });
-    return;
-  }
-  const mcp = await tools.claudeMcpConfigFile().catch(() => null);
-  const { args, prompt, sessionId } = buildArgs(req, mcp);
-  const child = spawn(bin, args, { cwd: workspace(), stdio: ['pipe', 'pipe', 'pipe'] });
-  signal?.addEventListener('abort', () => child.kill('SIGTERM'));
-  child.stdin.end(prompt);
+const INTERRUPT_GRACE_MS = 5000;
+const MAX_TASK_OUTPUT_BYTES = 4 * 1024 * 1024;
+const unknownOutcome = /timed?\s*out|timeout|connection.{0,30}(lost|closed|reset)|ECONNRESET|EPIPE|interrupt|abort|cancel/i;
 
-  let text = '';
+/** Several queued instructions form one new CLI turn, retaining FIFO order and native media blocks. */
+function queuedContent(messages) {
+  if (messages.length === 1) return messageContent(messages[0]);
+  if (!messages.some((message) => message.media?.length)) {
+    return messages.map((message, index) => `Queued message ${index + 1}:\n${message.content}`).join('\n\n');
+  }
+  return messages.flatMap((message, index) => {
+    const content = messageContent(message);
+    return [
+      { type: 'text', text: `${index ? '\n\n' : ''}Queued message ${index + 1}:\n` },
+      ...(typeof content === 'string' ? [{ type: 'text', text: content }] : content),
+    ];
+  });
+}
+
+/**
+ * A CLI attempt settles only after its process exits. SIGINT requests a resumable turn boundary;
+ * SIGTERM stops work. A returned continuation is main-process data, never renderer input.
+ */
+function openAttempt({ request, continuation, updates = [], emitResultText = true }, emit) {
+  let resolveSettled;
+  const settled = new Promise((resolve) => { resolveSettled = resolve; });
+  let child = null;
+  let req = null;
+  let sessionId = null;
+  let sessionConfirmed = false;
+  let sessionMismatch = false;
+  let interrupted = false;
+  let stopped = false;
   let finished = false;
+  let result = null;
+  let failure = null;
+  let uncertainEffects = false;
+  let graceTimer = null;
+  let killTimer = null;
+  let text = '';
   let stderr = '';
   let buffer = '';
-  const finish = (msg) => {
+  let toolBytes = 0;
+  const pendingTools = new Set();
+  const listeners = [];
+
+  const finish = (outcome) => {
     if (finished) return;
     finished = true;
-    emit(msg);
+    timers.clearTimeout(graceTimer);
+    timers.clearTimeout(killTimer);
+    for (const [target, event, listener] of listeners) target.removeListener(event, listener);
+    if (outcome.kind !== 'complete' && req) sessions.delete(req.conversationId);
+    resolveSettled(outcome);
+  };
+  const on = (target, event, listener) => {
+    target.on(event, listener);
+    listeners.push([target, event, listener]);
+  };
+  const kill = (signal) => {
+    try {
+      child?.kill(signal);
+    } catch (error) {
+      failure ||= `Could not stop Claude Code: ${error.message}`;
+      uncertainEffects = true;
+    }
+  };
+  const terminate = () => {
+    timers.clearTimeout(graceTimer);
+    kill('SIGTERM');
+    if (!killTimer) {
+      killTimer = timers.setTimeout(() => { if (!finished) kill('SIGKILL'); }, INTERRUPT_GRACE_MS);
+      killTimer.unref?.();
+    }
+  };
+  const savedContinuation = (pending = false) => ({
+    provider: 'claude', version: 1, sessionId: pending ? null : sessionId,
+    pending, model: req.model, mode: req.mode, conversationId: req.conversationId,
+    messages: [...req.messages, ...(text ? [{ role: 'assistant', content: text }] : [])],
+  });
+  const failBeforeSpawn = () => {
+    if (finished) return true;
+    if (stopped) {
+      finish({ kind: 'failed', error: 'Stopped.' });
+      return true;
+    }
+    if (interrupted) {
+      finish({ kind: 'interrupted', continuation: savedContinuation(true) });
+      return true;
+    }
+    return false;
   };
 
-  child.stderr.on('data', (d) => {
-    stderr = (stderr + d).slice(-2000);
-  });
-  child.stdout.on('data', (chunk) => {
-    buffer += chunk;
-    let idx;
-    while ((idx = buffer.indexOf('\n')) !== -1) {
-      const line = buffer.slice(0, idx).trim();
-      buffer = buffer.slice(idx + 1);
-      if (!line) continue;
-      let e;
-      try {
-        e = JSON.parse(line);
-      } catch {
-        continue;
+  const handle = {
+    settled,
+    interrupt() {
+      if (finished || stopped || interrupted) return;
+      interrupted = true;
+      if (!child) {
+        if (req) failBeforeSpawn();
+        return;
       }
-      if (e.type === 'stream_event' && e.event?.type === 'content_block_delta' && e.event.delta?.type === 'text_delta') {
-        text += e.event.delta.text;
-        emit({ type: 'delta', text: e.event.delta.text });
-      } else if (e.type === 'stream_event' && e.event?.type === 'content_block_start' && e.event.content_block?.type === 'text') {
-        // Text after a tool call starts a new paragraph instead of running on from the last one.
-        if (text && !/\n\s*$/.test(text)) {
-          text += '\n\n';
-          emit({ type: 'delta', text: '\n\n' });
+      kill('SIGINT');
+      graceTimer = timers.setTimeout(() => {
+        if (finished) return;
+        failure = 'Claude Code did not acknowledge interruption and exit. Queued messages were not applied.';
+        uncertainEffects = true;
+        terminate();
+      }, INTERRUPT_GRACE_MS);
+      graceTimer.unref?.();
+    },
+    stop() {
+      if (finished || stopped) return;
+      stopped = true;
+      if (child) terminate();
+      else if (req) failBeforeSpawn();
+    },
+  };
+
+  const readLine = (line) => {
+    let event;
+    try { event = JSON.parse(line); } catch { return; }
+    if (!event || typeof event !== 'object') return;
+    if (typeof event.session_id === 'string') {
+      if (event.session_id === sessionId) sessionConfirmed = true;
+      else sessionMismatch = true;
+    }
+    if (event.type === 'stream_event' && event.event?.type === 'content_block_delta'
+      && event.event.delta?.type === 'text_delta' && typeof event.event.delta.text === 'string') {
+      text += event.event.delta.text;
+      if (!stopped && !failure) emit({ type: 'delta', text: event.event.delta.text });
+    } else if (event.type === 'stream_event' && event.event?.type === 'content_block_start'
+      && event.event.content_block?.type === 'text' && text && !/\n\s*$/.test(text)) {
+      text += '\n\n';
+      if (!stopped && !failure) emit({ type: 'delta', text: '\n\n' });
+    } else if (event.type === 'assistant' || event.type === 'user') {
+      const blocks = Array.isArray(event.message?.content) ? event.message.content : [];
+      for (const block of blocks) {
+        if (block.type === 'tool_use') {
+          pendingTools.add(block.id);
+          toolBytes += Buffer.byteLength(JSON.stringify(block));
+        } else if (block.type === 'tool_result') {
+          pendingTools.delete(block.tool_use_id);
+          toolBytes += Buffer.byteLength(JSON.stringify(block));
+          if (block.is_error && unknownOutcome.test(JSON.stringify(block.content))) uncertainEffects = true;
         }
-      } else if (e.type === 'assistant' || e.type === 'user') {
-        for (const event of toolEvents(e, tools.labelTool)) emit(event);
-      } else if (e.type === 'result') {
-        if (e.is_error || e.subtype !== 'success') {
-          sessions.delete(req.conversationId);
-          finish({ type: 'error', message: e.result || `Claude stopped (${e.subtype}).` });
-        } else {
-          recordSession(req, sessionId, text || e.result || '');
-          finish({ type: 'done' });
+      }
+      for (const activity of toolEvents(event, tools.labelTool)) {
+        if (!stopped && !failure) emit(activity);
+      }
+    } else if (event.type === 'result') {
+      result = event;
+    }
+    if (Buffer.byteLength(text) + toolBytes > MAX_TASK_OUTPUT_BYTES && !failure) {
+      failure = 'Claude task output exceeded the 4 MB limit. Partial output was preserved.';
+      terminate();
+    }
+  };
+
+  void (async () => {
+    try {
+      const base = validateRequest(request);
+      const cleanUpdates = updates.length ? validateMessages(updates) : [];
+      if (cleanUpdates.some((message) => message.role !== 'user')) throw new Error('Queued messages must be from the user.');
+      if (continuation) {
+        if (continuation.provider !== 'claude' || continuation.version !== 1
+          || continuation.model !== base.model || continuation.mode !== base.mode
+          || continuation.conversationId !== base.conversationId
+          || (!continuation.pending && (typeof continuation.sessionId !== 'string'
+            || !/^[\w-]{1,100}$/.test(continuation.sessionId))) || !cleanUpdates.length) {
+          throw new Error('Invalid Claude task continuation. Queued messages were not applied.');
         }
+      }
+      req = { ...base, messages: validateMessages([...(continuation?.messages ?? base.messages), ...cleanUpdates]) };
+      if (failBeforeSpawn()) return;
+      const bin = await findClaude();
+      if (failBeforeSpawn()) return;
+      if (!bin) throw new Error('Claude Code is not installed, so Jarvis cannot reach Claude.');
+      const mcp = await tools.claudeMcpConfigFile().catch(() => null);
+      if (failBeforeSpawn()) return;
+      const resume = continuation && !continuation.pending
+        ? { sessionId: continuation.sessionId, content: queuedContent(cleanUpdates) } : null;
+      const built = buildArgs(req, mcp, resume);
+      sessionId = built.sessionId;
+      if (failBeforeSpawn()) return;
+      child = spawn(bin, built.args, { cwd: workspace(), stdio: ['pipe', 'pipe', 'pipe'] });
+      on(child.stderr, 'data', (data) => { stderr = (stderr + data).slice(-2000); });
+      on(child.stdout, 'data', (data) => {
+        buffer += data;
+        if (Buffer.byteLength(buffer) > MAX_TASK_OUTPUT_BYTES) {
+          failure = 'Claude task output exceeded the 4 MB limit. Partial output was preserved.';
+          buffer = '';
+          terminate();
+          return;
+        }
+        let index;
+        while ((index = buffer.indexOf('\n')) !== -1) {
+          const line = buffer.slice(0, index).trim();
+          buffer = buffer.slice(index + 1);
+          if (line) readLine(line);
+        }
+      });
+      on(child.stdin, 'error', (error) => {
+        failure = `Could not send files to Claude Code: ${error.message}`;
+        terminate();
+      });
+      on(child, 'error', (error) => {
+        failure = `Could not start Claude Code: ${error.message}`;
+        // Node still emits close after a failed spawn; do not release ownership until then.
+      });
+      on(child, 'close', (code, signal) => {
+        if (buffer.trim()) readLine(buffer.trim());
+        if (stopped) return finish({ kind: 'failed', error: 'Stopped.', ...(pendingTools.size || uncertainEffects ? { uncertainEffects: true } : {}) });
+        if (failure) return finish({ kind: 'failed', error: failure, ...(uncertainEffects || pendingTools.size ? { uncertainEffects: true } : {}) });
+        if (pendingTools.size || uncertainEffects) {
+          return finish({ kind: 'failed', error: 'A Claude tool outcome is unknown. Queued messages were not applied; check the action before retrying.', uncertainEffects: true });
+        }
+        if (sessionMismatch) return finish({ kind: 'failed', error: 'Claude returned an unexpected session. Queued messages were not applied.' });
+        if (!text && result?.subtype === 'success' && typeof result.result === 'string' && result.result) {
+          if (Buffer.byteLength(result.result) + toolBytes > MAX_TASK_OUTPUT_BYTES) {
+            return finish({ kind: 'failed', error: 'Claude task output exceeded the 4 MB limit. Partial output was preserved.' });
+          }
+          text = result.result;
+          if (emitResultText) emit({ type: 'delta', text });
+        }
+        if (interrupted) {
+          const errors = Array.isArray(result?.errors) ? result.errors : [];
+          const acknowledgement = result && (result.subtype === 'success'
+            || /interrupt|cancelled by user/i.test([result.subtype, result.result, ...errors].join(' ')));
+          if (!acknowledgement || !sessionConfirmed || (signal && signal !== 'SIGINT')
+            || (code !== null && ![0, 1, 130].includes(code))) {
+            return finish({ kind: 'failed', error: 'Claude Code did not provide a confirmed interruption session. Queued messages were not applied.', uncertainEffects: true });
+          }
+          return finish({ kind: 'interrupted', continuation: savedContinuation() });
+        }
+        if (!result || result.is_error || result.subtype !== 'success' || code !== 0) {
+          const hint = /log ?in|auth/i.test(stderr) ? ' Sign in to Claude in Settings.' : '';
+          return finish({ kind: 'failed', error: result?.result || `Claude Code exited before finishing (code ${code}).${hint}` });
+        }
+        recordSession(req, sessionId, text);
+        finish({ kind: 'complete', continuation: savedContinuation() });
+      });
+      child.stdin.end(built.prompt);
+    } catch (error) {
+      if (child) {
+        failure = error.message || 'Could not reach Claude Code.';
+        terminate();
+      } else {
+        finish({ kind: 'failed', error: error.message || 'Could not reach Claude Code.' });
       }
     }
-  });
-  // Resolve only when the process exits, so the request stays abortable until then.
-  await new Promise((resolve) => {
-    child.on('error', (err) => {
-      finish({ type: 'error', message: `Could not start Claude Code: ${err.message}` });
-      resolve();
-    });
-    child.on('close', (code) => {
-      if (signal?.aborted) finish({ type: 'error', message: 'Stopped.' });
-      const hint = /log ?in|auth/i.test(stderr) ? ' Sign in to Claude in Settings.' : '';
-      finish({ type: 'error', message: `Claude Code exited before finishing (code ${code}).${hint}` });
-      resolve();
-    });
-  });
+  })();
+  return handle;
+}
+
+/** Existing stream IPC remains compatible; task callers use the explicit handle above. */
+async function streamResponse(payload, emit, signal) {
+  const handle = openAttempt({ request: payload, emitResultText: false }, emit);
+  const abort = () => handle.stop();
+  signal?.addEventListener('abort', abort, { once: true });
+  if (signal?.aborted) abort();
+  try {
+    const outcome = await handle.settled;
+    emit(outcome.kind === 'complete' ? { type: 'done' } : { type: 'error', message: outcome.error || 'Stopped.' });
+  } finally {
+    signal?.removeEventListener('abort', abort);
+  }
 }
 
 function registerIpc(ipcMain) {
@@ -292,4 +510,4 @@ function registerIpc(ipcMain) {
   ipcMain.handle('claude:abort', (_event, requestId) => inflight.get(requestId)?.abort());
 }
 
-module.exports = { registerIpc, validateRequest, buildArgs, recordSession, transcriptPrompt, toolEvents, CHAT_SYSTEM_PROMPT };
+module.exports = { registerIpc, validateRequest, buildArgs, recordSession, transcriptPrompt, toolEvents, openAttempt, CHAT_SYSTEM_PROMPT };

@@ -30,9 +30,9 @@ export const MODEL_CATALOG: ModelInfo[] = [
   { id: 'claude-opus-5-5', name: 'Claude Opus 5.5', group: 'Anthropic', defaultReasoning: 'Medium' },
   { id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5', group: 'Anthropic', defaultReasoning: 'Medium' },
   { id: 'claude-haiku-5-5', name: 'Claude Haiku 5.5', group: 'Anthropic', defaultReasoning: 'Low' },
-  { id: 'gemini-4-argon', name: 'Gemini 4 Argon', group: 'Google', defaultReasoning: 'Medium' },
-  { id: 'grok-4.7', name: 'Grok 4.7', group: 'xAI', defaultReasoning: 'High', isNew: true },
-  { id: 'grok-4.6', name: 'Grok 4.6', group: 'xAI', defaultReasoning: 'High' },
+  // The official clients select the model available to the signed-in account.
+  { id: 'gemini-default', name: 'Gemini', group: 'Google', defaultReasoning: 'None' },
+  { id: 'grok-default', name: 'Grok', group: 'xAI', defaultReasoning: 'None' },
 ];
 
 export interface ModelSettings {
@@ -73,6 +73,13 @@ export function getCatalog(): ModelInfo[] {
   return liveOpenAI ? [...liveOpenAI, ...MODEL_CATALOG.filter((m) => m.group !== 'OpenAI')] : MODEL_CATALOG;
 }
 
+let availableGroups: Set<string> | null = null;
+
+/** Limits the picker to the provider groups the user has added (null lists every group). */
+export function setAvailableGroups(groups: string[] | null): void {
+  availableGroups = groups ? new Set(groups) : null;
+}
+
 export const findModel = (id: string): ModelInfo | undefined => getCatalog().find((m) => m.id === id);
 
 export function modelName(id: string): string {
@@ -83,15 +90,17 @@ export function modelName(id: string): string {
 /** Trigger text: name plus muted detail, e.g. "GPT-5.6 Sol" + "Medium Fast". */
 export function modelLabel(s: ModelSettings): { name: string; detail: string } {
   if (s.modelId === AUTO_MODEL_ID) return { name: 'Auto', detail: s.fast ? 'Fast' : '' };
+  if (s.modelId === 'gemini-default' || s.modelId === 'grok-default') return { name: modelName(s.modelId), detail: '' };
   const mode = isClaudeModel(s.modelId) && s.claudeMode === 'code' ? 'Code' : '';
   return { name: modelName(s.modelId), detail: [s.reasoning, mode, s.fast ? 'Fast' : ''].filter(Boolean).join(' ') };
 }
 
-/** Groups matching models in catalog order, dropping empty groups. */
+/** Groups matching models from added providers in catalog order, dropping empty groups. */
 export function groupModels(query: string): { group: string; models: ModelInfo[] }[] {
   const q = query.trim().toLowerCase();
   const groups: { group: string; models: ModelInfo[] }[] = [];
   for (const m of getCatalog()) {
+    if (availableGroups && !availableGroups.has(m.group)) continue;
     if (q && !m.name.toLowerCase().includes(q)) continue;
     let g = groups.find((x) => x.group === m.group);
     if (!g) groups.push((g = { group: m.group, models: [] }));

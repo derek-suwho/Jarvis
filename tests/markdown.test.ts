@@ -36,7 +36,49 @@ describe('parseMarkdown', () => {
 
   it('keeps fenced code verbatim, including an unclosed fence', () => {
     expect(parseMarkdown('```ts\nconst a = **1**;\n```')).toEqual([{ kind: 'code', lang: 'ts', text: 'const a = **1**;' }]);
-    expect(parseMarkdown('```\npartial')).toEqual([{ kind: 'code', lang: '', text: 'partial' }]);
+    expect(parseMarkdown('```\npartial')).toEqual([{ kind: 'code', lang: '', text: 'partial', open: true }]);
+  });
+
+  it('parses display math on its own lines in both delimiter styles', () => {
+    expect(parseMarkdown('Projection\n\n\\[\nx^\\star=P_C(x_0)\n\\]\n\nAfter')).toEqual([
+      { kind: 'paragraph', inlines: [{ kind: 'text', text: 'Projection' }] },
+      { kind: 'math', tex: 'x^\\star=P_C(x_0)' },
+      { kind: 'paragraph', inlines: [{ kind: 'text', text: 'After' }] },
+    ]);
+    expect(parseMarkdown('$$ a+b $$')).toEqual([{ kind: 'math', tex: 'a+b' }]);
+  });
+
+  it('ends a paragraph when display math starts', () => {
+    expect(parseMarkdown('Intro\n\\[\nx\n\\]').map((b) => b.kind)).toEqual(['paragraph', 'math']);
+  });
+
+  it('marks display math that is still streaming', () => {
+    expect(parseMarkdown('\\[\nx = ')).toEqual([{ kind: 'math', tex: 'x =', open: true }]);
+  });
+});
+
+describe('inline math', () => {
+  it('parses \\( \\) and $ $', () => {
+    expect(parseInline('a point \\(x_0\\), and $C_i$.')).toEqual([
+      { kind: 'text', text: 'a point ' },
+      { kind: 'math', tex: 'x_0', display: false },
+      { kind: 'text', text: ', and ' },
+      { kind: 'math', tex: 'C_i', display: false },
+      { kind: 'text', text: '.' },
+    ]);
+  });
+
+  it('keeps math intact where it contains emphasis characters', () => {
+    expect(parseInline('\\(a*b*c\\)')).toEqual([{ kind: 'math', tex: 'a*b*c', display: false }]);
+  });
+
+  it('leaves prices alone', () => {
+    expect(parseInline('costs $5 and $10')).toEqual([{ kind: 'text', text: 'costs $5 and $10' }]);
+    expect(parseInline('$5,$10')).toEqual([{ kind: 'text', text: '$5,$10' }]);
+  });
+
+  it('does not parse math inside code spans', () => {
+    expect(parseInline('`$x$`')).toEqual([{ kind: 'code', text: '$x$' }]);
   });
 
   it('parses tables and quotes', () => {

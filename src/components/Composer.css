@@ -1,0 +1,281 @@
+.composer-shell {
+  width: 100%;
+  min-width: 0;
+}
+
+.composer-shell .composer {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 12px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 22px;
+  background: var(--surface);
+  box-shadow: 0 2px 4px rgba(8, 15, 14, 0.05), 0 12px 32px rgba(8, 15, 14, 0.05);
+}
+
+.composer-shell .composer:focus-within {
+  border-color: color-mix(in srgb, var(--text-muted) 45%, transparent);
+}
+
+.composer-shell .composer.dragging {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-tint);
+}
+
+.composer-shell .composer textarea {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  min-height: 48px;
+  max-height: 224px;
+  margin: 0;
+  padding: 3px 7px 10px;
+  border: none;
+  border-radius: 4px;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.65;
+  overflow-y: auto;
+}
+
+.composer-shell .composer textarea::placeholder {
+  color: var(--text-dim);
+}
+
+.composer-shell .composer textarea:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.composer-toolbar,
+.composer-tools,
+.composer-send-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.composer-toolbar {
+  justify-content: space-between;
+  min-height: 36px;
+}
+
+.composer-tools {
+  min-width: 0;
+}
+
+.composer-send-tools {
+  flex-shrink: 0;
+}
+
+.composer-shell .composer-plus,
+.composer-shell .composer-mic {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  padding: 8px;
+  border-radius: 50%;
+  transition: transform 0.18s var(--ease);
+}
+
+.composer-shell .composer-plus:hover,
+.composer-shell .composer-mic:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.composer-shell .composer-plus:active,
+.composer-shell .composer-mic:active {
+  transform: scale(0.92);
+}
+
+.composer-shell .send-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  padding: 8px;
+  border: none;
+  border-radius: 50%;
+  background: var(--send-bg);
+  color: var(--send-fg);
+  cursor: pointer;
+  transition: opacity 0.18s var(--ease), transform 0.18s var(--ease);
+}
+
+.composer-shell .send-btn:hover:not(:disabled) {
+  opacity: 0.84;
+}
+
+.composer-shell .send-btn:active:not(:disabled) {
+  transform: scale(0.92);
+}
+
+.composer-shell .send-btn:disabled {
+  background: var(--send-disabled-bg);
+  color: var(--send-disabled-fg);
+  cursor: default;
+}
+
+.composer-shell button:focus-visible {
+  outline: 2px solid var(--text-muted);
+  outline-offset: 3px;
+  box-shadow: none;
+}
+
+.composer-shell .composer-files {
+  gap: 10px;
+  padding: 2px 6px 4px;
+}
+
+.composer-shell .file-chip {
+  max-width: min(250px, 100%);
+  padding-right: 30px;
+  background: var(--bg-main);
+}
+
+.composer-shell .file-ext {
+  background: var(--accent-tint);
+  color: var(--accent-text);
+}
+
+.composer-shell .file-remove {
+  top: 5px;
+  right: 4px;
+  width: 23px;
+  height: 23px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  opacity: 1;
+}
+
+.composer-shell .file-remove:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.composer-shell .file-remove:active {
+  transform: scale(0.9);
+}
+
+.composer-file-size {
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.composer-file-preview {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  object-fit: cover;
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+
+.composer-errors {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--danger-tint);
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.composer-errors p {
+  margin: 0;
+}
+
+.composer-errors p + p {
+  margin-top: 4px;
+}
+
+.composer-errors .icon-btn {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  padding: 3px;
+  color: inherit;
+}
+
+.composer-drop {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  border: 1px dashed var(--accent);
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--surface) 95%, transparent);
+  color: var(--text);
+  font-size: 14px;
+  pointer-events: none;
+}
+
+.composer-footer {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 28px;
+  padding: 8px 8px 0;
+  color: var(--text-dim);
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+.composer-status {
+  min-width: 0;
+}
+
+.composer-key-hint {
+  flex-shrink: 0;
+}
+
+.composer-key-hint kbd {
+  font: inherit;
+  color: var(--text-muted);
+}
+
+.composer-key-hint > span {
+  padding: 0 4px;
+}
+
+@media (max-width: 600px) {
+  .composer-shell .composer {
+    padding: 12px 10px 9px;
+    border-radius: 20px;
+  }
+
+  .composer-shell .composer textarea {
+    font-size: 16px;
+  }
+
+  .composer-key-hint {
+    display: none;
+  }
+
+  .composer-footer {
+    min-height: 23px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-shell *,
+  .composer-shell *::after {
+    animation: none;
+    transition: none;
+  }
+}

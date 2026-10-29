@@ -43,10 +43,10 @@ export function ChatGPTConnection({ account }: { account: ChatGPTAccount }) {
   if (state.phase === 'connected') {
     return (
       <div className="connect-actions">
-        <button className="text-btn" onClick={() => openExternal(MANAGE_USAGE_URL)}>
+        <button className="text-btn account-action" onClick={() => openExternal(MANAGE_USAGE_URL)}>
           Manage usage
         </button>
-        <button className="text-btn danger" onClick={() => void account.signOut()}>
+        <button className="text-btn danger account-action" onClick={() => void account.signOut()}>
           Sign out
         </button>
       </div>

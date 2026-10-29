@@ -2,6 +2,7 @@ import type { CSSProperties, ReactNode } from 'react';
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { Attachment, Chat, Feedback } from '../lib/chats';
 import type { ModelSettings } from '../lib/models';
+import type { TaskResult } from '../shared/tasks';
 import { Composer } from './Composer';
 import './ChatView.css';
 import { ArrowDownIcon, ArrowRightIcon } from './Icons';
@@ -10,10 +11,16 @@ import './Messages.css';
 
 interface Props {
   chat: Chat | null;
+  draftKey?: string;
+  persistDraft?: boolean;
   pending: boolean;
+  submitDisabled?: boolean;
+  taskQueue?: ReactNode;
+  taskStatus?: string;
   model: ModelSettings;
   onModelChange: (s: ModelSettings) => void;
-  onSend: (text: string, attachments: Attachment[]) => void;
+  onSend: (text: string, attachments: Attachment[]) => Promise<TaskResult | void> | void;
+  validateSend?: (text: string, attachments: Attachment[]) => string | null;
   onStop?: () => void;
   onEdit?: (messageId: string, text: string) => void;
   onRegenerate?: (messageId: string) => void;
@@ -22,7 +29,7 @@ interface Props {
   streamingId?: string | null;
   emptyTitle?: string;
   eyebrow?: string;
-  suggestions?: string[];
+  suggestions?: { title: string; detail: string; prompt: string }[];
   /** Extra content under the empty-state composer (e.g. a project's chat list). */
   emptyFooter?: ReactNode;
   placeholder?: string;
@@ -42,7 +49,8 @@ export function ChatView(p: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const [atBottom, setAtBottom] = useState(true);
-  const messages = chat?.messages ?? [];
+  const [prefill, setPrefill] = useState<{ text: string; id: number }>();
+  const messages = (chat?.messages ?? []).filter((message) => message.delivery !== 'queued' && message.delivery !== 'applying');
   const last = messages[messages.length - 1];
 
   const spacerRef = useRef<HTMLDivElement>(null);
@@ -89,8 +97,22 @@ export function ChatView(p: Props) {
 
   const composer = (
     <>
-      <Composer model={model} onModelChange={onModelChange} onSend={onSend} disabled={pending} onStop={onStop} placeholder={p.placeholder} />
-      {p.composerNote}
+      {p.taskQueue}
+      <Composer
+        key={p.draftKey ?? chat?.id ?? 'new'}
+        draftKey={p.draftKey ?? chat?.id}
+        persistDraft={p.persistDraft}
+        prefill={prefill}
+        model={model}
+        onModelChange={onModelChange}
+        onSend={onSend}
+        validateSend={p.validateSend}
+        footerNote={p.composerNote}
+        disabled={p.submitDisabled ?? false}
+        busy={pending}
+        onStop={onStop}
+        placeholder={p.placeholder}
+      />
     </>
   );
 
@@ -101,13 +123,17 @@ export function ChatView(p: Props) {
           {p.banner}
           {p.eyebrow !== '' && <p className="eyebrow">{p.eyebrow ?? 'New conversation'}</p>}
           <h1>{p.emptyTitle ?? 'Where should we begin?'}</h1>
+          {suggestions && <p className="welcome-subtitle">What would you like to work on?</p>}
           {composer}
           {suggestions && suggestions.length > 0 && (
             <ul className="suggestions">
               {suggestions.map((s, i) => (
-                <li key={s} style={{ '--i': i } as CSSProperties}>
-                  <button onClick={() => onSend(s, [])} disabled={pending}>
-                    <span>{s}</span>
+                <li key={s.title} style={{ '--i': i } as CSSProperties}>
+                  <button onClick={() => setPrefill({ text: s.prompt, id: Date.now() })} disabled={pending}>
+                    <span>
+                      <strong>{s.title}</strong>
+                      <small>{s.detail}</small>
+                    </span>
                     <ArrowRightIcon />
                   </button>
                 </li>
@@ -124,13 +150,15 @@ export function ChatView(p: Props) {
     <div className="conversation">
       <div
         className="messages-scroll"
+        role="region"
+        aria-label="Conversation"
         ref={scrollRef}
         onScroll={(e) => {
           const el = e.currentTarget;
           setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX);
         }}
       >
-        <div className="messages">
+        <div className="messages" aria-busy={pending}>
           {messages.map((m, i) => (
             <MessageItem
               key={m.id}
@@ -144,7 +172,10 @@ export function ChatView(p: Props) {
             />
           ))}
           {pending && last?.role === 'user' && (
-            <div className="message assistant" aria-label="Generating reply">
+            <div className="message assistant" role="status" aria-label="Generating reply">
+              <div className="thinking-label">
+                Working on it<span aria-hidden>…</span>
+              </div>
               <div className="skeleton">
                 <span />
                 <span />
@@ -157,6 +188,9 @@ export function ChatView(p: Props) {
         </div>
       </div>
       <div className="composer-dock">
+        <span className="sr-only" role="status">
+          {pending ? p.taskStatus ?? 'Generating response. New messages will be queued.' : 'Ready for your message.'}
+        </span>
         {!atBottom && (
           <button
             className="scroll-bottom"

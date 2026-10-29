@@ -2,11 +2,14 @@
 // Spec: https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference
 const auth = require('./chatgpt-auth.cjs');
 const tools = require('./tools/index.cjs');
+const { RENDERING_GUIDE } = require('./rendering-guide.cjs');
+const { validateMessages, MAX_REQUEST_BYTES } = require('./media-input.cjs');
 
 const API_BASE = 'https://api.openai.com/v1';
-const MAX_MESSAGES = 200;
-const MAX_CHARS = 400_000;
 const MAX_TOOL_ROUNDS = 8;
+const MAX_GENERATED_BYTES = 4 * 1024 * 1024;
+const INTERRUPTED_PREFIX = '[This response was interrupted before completion.]\n';
+const NOT_EXECUTED = 'Not executed: the user interrupted this plan before the tool started.';
 
 const USAGE_ERRORS = {
   subscription_sharing_usage_limit_exceeded:
@@ -18,24 +21,29 @@ const USAGE_ERRORS = {
 function validateRequest(payload) {
   const { model, messages } = payload || {};
   if (typeof model !== 'string' || !/^[\w.:-]{1,100}$/.test(model)) throw new Error('Invalid model.');
-  if (!Array.isArray(messages) || messages.length === 0 || messages.length > MAX_MESSAGES) {
-    throw new Error('Invalid conversation.');
-  }
-  let total = 0;
-  const input = messages.map((m) => {
-    if (!m || (m.role !== 'user' && m.role !== 'assistant') || typeof m.content !== 'string') {
-      throw new Error('Invalid message.');
+  const input = validateMessages(messages).map((message) => {
+    if (!message.media?.length) return { role: message.role, content: message.content };
+    const content = message.content ? [{ type: 'input_text', text: message.content }] : [];
+    for (const file of message.media) {
+      const dataUrl = `data:${file.type};base64,${file.data}`;
+      if (file.type === 'application/pdf') {
+        content.push({ type: 'input_file', filename: file.name, file_data: dataUrl });
+      } else {
+        content.push({ type: 'input_text', text: `Attached image: ${JSON.stringify(file.name)}` });
+        content.push({ type: 'input_image', image_url: dataUrl });
+      }
     }
-    total += m.content.length;
-    return { role: m.role, content: m.content };
+    return { role: message.role, content };
   });
-  if (total > MAX_CHARS) throw new Error('Conversation is too long to send.');
   return { model, input };
 }
 
 async function authedFetch(path, init) {
   let token = await auth.getAccessToken();
-  const go = (t) => fetch(`${API_BASE}${path}`, { ...init, headers: { ...init?.headers, Authorization: `Bearer ${t}` } });
+  const go = (t) => {
+    init?.signal?.throwIfAborted();
+    return fetch(`${API_BASE}${path}`, { ...init, headers: { ...init?.headers, Authorization: `Bearer ${t}` } });
+  };
   let res = await go(token);
   // An access token can be revoked or rotated early; refresh once and retry.
   if (res.status === 401) {
@@ -103,18 +111,24 @@ function functionTools(catalog) {
 }
 
 async function runCall(catalog, call) {
+  return (await runCallOutcome(catalog, call)).output;
+}
+
+/** A rejected transport may have performed the action; do not turn it into a retryable model error. */
+async function runCallOutcome(catalog, call) {
   const tool = catalog.find((t) => t.name === call.name);
-  if (!tool) return `Unknown tool ${call.name}.`;
+  if (!tool) return { output: `Unknown tool ${call.name}.`, failed: true };
   let args;
   try {
     args = call.arguments ? JSON.parse(call.arguments) : {};
   } catch {
-    return 'Tool arguments were not valid JSON.';
+    return { output: 'Tool arguments were not valid JSON.', failed: true };
   }
   try {
-    return await tool.run(args);
+    const output = await tool.run(args);
+    return { output: typeof output === 'string' ? output : JSON.stringify(output ?? null), failed: /^Error:/.test(output) };
   } catch (err) {
-    return `Error: ${err.message || 'the tool failed.'}`;
+    return { output: `Error: ${err.message || 'the tool failed.'}`, failed: true, uncertainEffects: true };
   }
 }
 
@@ -139,90 +153,210 @@ function toolEvent(catalog, call, status) {
   };
 }
 
-/** Streams one model turn. Returns { text, calls }, or null after emitting a terminal error. */
-async function streamTurn(model, input, toolDefs, emit, signal) {
+/** The caller owns the checkpoint so interruption cannot discard received text or planned calls. */
+async function streamTurn(model, input, toolDefs, emit, signal, checkpoint) {
+  signal.throwIfAborted();
+  const body = JSON.stringify({ model, instructions: RENDERING_GUIDE, input, store: false, stream: true, ...(toolDefs.length ? { tools: toolDefs, tool_choice: 'auto' } : {}) });
+  if (Buffer.byteLength(body, 'utf8') > MAX_REQUEST_BYTES) {
+    throw new Error('Conversation and tool context are too large to send. Start a new chat or use smaller files.');
+  }
   const res = await authedFetch('/responses', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
-    body: JSON.stringify({ model, input, store: false, stream: true, ...(toolDefs.length ? { tools: toolDefs, tool_choice: 'auto' } : {}) }),
+    body,
     signal,
   });
   if (!res.ok || !res.body) {
-    emit({ type: 'error', message: await errorMessage(res) });
-    return null;
+    throw new Error(await errorMessage(res));
   }
-  let text = '';
-  const calls = [];
   for await (const event of sseEvents(res.body)) {
+    signal.throwIfAborted();
     if (event.type === 'response.output_text.delta' && typeof event.delta === 'string') {
-      text += event.delta;
       emit({ type: 'delta', text: event.delta });
+      checkpoint.text += event.delta;
     } else if (event.type === 'response.output_item.done' && event.item?.type === 'function_call') {
       const { call_id: callId, name, arguments: args } = event.item;
-      calls.push({ call_id: callId, name, arguments: args });
+      if (typeof callId !== 'string' || typeof name !== 'string' || typeof args !== 'string') {
+        throw new Error('ChatGPT returned an invalid tool call.');
+      }
+      if (!checkpoint.calls.some((call) => call.call_id === callId)) {
+        checkpoint.calls.push({ call_id: callId, name, arguments: args });
+      }
     } else if (event.type === 'response.completed') {
-      return { text, calls };
+      checkpoint.complete = true;
+      return;
     } else if (event.type === 'response.failed' || event.type === 'error') {
       const err = event.response?.error ?? event.error ?? {};
-      emit({ type: 'error', message: USAGE_ERRORS[err.code] ?? err.message ?? 'ChatGPT could not complete the response.' });
-      return null;
+      throw new Error(USAGE_ERRORS[err.code] ?? err.message ?? 'ChatGPT could not complete the response.');
     } else if (event.type === 'response.incomplete') {
       const reason = event.response?.incomplete_details?.reason;
-      emit({ type: 'error', message: `The response stopped early${reason ? ` (${reason})` : ''}.` });
-      return null;
+      throw new Error(`The response stopped early${reason ? ` (${reason})` : ''}.`);
     }
   }
   // Only response.completed marks success.
-  emit({ type: 'error', message: 'The connection to ChatGPT ended before the response finished.' });
-  return null;
+  throw new Error('The connection to ChatGPT ended before the response finished.');
 }
 
 /**
- * Streams one response, running any tool calls the model makes and feeding results back until it answers.
- * `emit` receives { type: 'delta', text } and finally exactly one of { type: 'done' } or { type: 'error', message }.
+ * One task attempt. Only delta/tool events cross `emit`; `settled` owns the lifecycle.
+ * Interrupt/stop abort HTTP, but wait for an already-dispatched tool to settle before releasing the slot.
+ * Continuation stays in main and preserves native tool pairs instead of replaying external actions.
+ * @param {{ request: *, continuation?: *, updates?: import('../src/lib/replyContext').ReplyMessage[], attemptId?: string }} options
  */
-async function streamResponse(payload, emit, signal, getTools = tools.catalog) {
-  let request;
-  try {
-    request = validateRequest(payload);
-  } catch (err) {
-    emit({ type: 'error', message: err.message });
-    return;
-  }
-  let catalog = [];
-  try {
-    catalog = await getTools();
-  } catch {
-    // A broken tools setup never blocks a plain reply.
-  }
-  const toolDefs = functionTools(catalog);
-  const input = [...request.input];
-  try {
-    for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-      const turn = await streamTurn(request.model, input, toolDefs, emit, signal);
-      if (!turn) return;
-      if (!turn.calls.length) {
-        emit({ type: 'done' });
-        return;
-      }
-      if (turn.text) {
-        input.push({ role: 'assistant', content: turn.text });
-        emit({ type: 'delta', text: '\n\n' });
-      }
-      for (const call of turn.calls) {
-        if (signal?.aborted) throw new Error('Stopped.');
-        input.push({ type: 'function_call', ...call });
-        emit(toolEvent(catalog, call, 'running'));
-        const output = await runCall(catalog, call);
-        const failed = !catalog.some((t) => t.name === call.name) || /^(Error:|Tool arguments were not valid JSON)/.test(output);
-        emit(toolEvent(catalog, call, failed ? 'error' : 'done'));
-        input.push({ type: 'function_call_output', call_id: call.call_id, output });
-      }
+function openAttempt({ request, continuation, updates = [] }, emit, getTools = tools.catalog) {
+  const lifetime = new AbortController();
+  let http = null;
+  let finished = false;
+  let input = [];
+  let generatedBytes = 0;
+  let checkpoint = null;
+  const cancel = () => {
+    if (finished) return;
+    lifetime.abort();
+    http?.abort();
+  };
+  const countGeneratedBytes = (bytes) => {
+    if (generatedBytes + bytes > MAX_GENERATED_BYTES) {
+      const error = new Error('Task output and tool context exceeded the 4 MiB limit. Partial output has been kept.');
+      error.code = 'TASK_CONTEXT_LIMIT';
+      throw error;
     }
-    emit({ type: 'error', message: 'Stopped after too many tool calls in one reply.' });
-  } catch (err) {
-    if (signal?.aborted) emit({ type: 'error', message: 'Stopped.' });
-    else emit({ type: 'error', message: err.message || 'Could not reach ChatGPT.' });
+    generatedBytes += bytes;
+  };
+  const countGenerated = (value) => countGeneratedBytes(Buffer.byteLength(value, 'utf8'));
+  const appendGenerated = (item) => {
+    countGenerated(JSON.stringify(item));
+    input.push(item);
+  };
+  const saveText = () => {
+    if (!checkpoint?.text) return;
+    // Text deltas are already counted; count only the serialized envelope and interruption label here.
+    const content = (checkpoint.complete ? '' : INTERRUPTED_PREFIX) + checkpoint.text;
+    const item = { role: 'assistant', content };
+    countGeneratedBytes(Buffer.byteLength(JSON.stringify(item), 'utf8') - Buffer.byteLength(checkpoint.text, 'utf8'));
+    input.push(item);
+    checkpoint.text = '';
+  };
+  const cancelRemaining = (calls) => {
+    for (const call of calls) {
+      appendGenerated({ type: 'function_call', ...call });
+      appendGenerated({ type: 'function_call_output', call_id: call.call_id, output: NOT_EXECUTED });
+    }
+  };
+  const snapshot = () => ({ provider: 'chatgpt', model: request?.model, input: structuredClone(input), generatedBytes });
+  const settled = (async () => {
+    try {
+      const clean = validateRequest({ ...request, messages: [...(request?.messages ?? []), ...updates] });
+      if (updates.some((message) => message.role !== 'user')) throw new Error('Queued messages must be user messages.');
+      if (continuation) {
+        if (continuation.provider !== 'chatgpt' || continuation.model !== clean.model || !Array.isArray(continuation.input)
+          || !Number.isSafeInteger(continuation.generatedBytes) || continuation.generatedBytes < 0
+          || continuation.generatedBytes > MAX_GENERATED_BYTES) {
+          throw new Error('Invalid ChatGPT task continuation.');
+        }
+        input = structuredClone(continuation.input);
+        generatedBytes = continuation.generatedBytes;
+        if (updates.length) input.push(...validateRequest({ model: clean.model, messages: updates }).input);
+      } else {
+        input = clean.input;
+      }
+      if (lifetime.signal.aborted) return { kind: 'interrupted', continuation: snapshot() };
+      let catalog = [];
+      try {
+        catalog = await getTools();
+      } catch {
+        // A broken tools setup never blocks a plain reply.
+      }
+      const toolDefs = functionTools(catalog);
+      for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+        if (lifetime.signal.aborted) return { kind: 'interrupted', continuation: snapshot() };
+        checkpoint = { text: '', calls: [], complete: false };
+        http = new AbortController();
+        try {
+          await streamTurn(clean.model, input, toolDefs, (event) => {
+            if (lifetime.signal.aborted) return;
+            countGenerated(event.text);
+            emit(event);
+          }, http.signal, checkpoint);
+        } finally {
+          http = null;
+        }
+        const hadText = Boolean(checkpoint.text);
+        saveText();
+        const calls = checkpoint.calls;
+        checkpoint = null;
+        if (lifetime.signal.aborted) {
+          cancelRemaining(calls);
+          return { kind: 'interrupted', continuation: snapshot() };
+        }
+        if (!calls.length) return { kind: 'complete', continuation: snapshot() };
+        for (let index = 0; index < calls.length; index++) {
+          if (lifetime.signal.aborted) {
+            cancelRemaining(calls.slice(index));
+            return { kind: 'interrupted', continuation: snapshot() };
+          }
+          const call = calls[index];
+          appendGenerated({ type: 'function_call', ...call });
+          emit(toolEvent(catalog, call, 'running'));
+          if (lifetime.signal.aborted) {
+            appendGenerated({ type: 'function_call_output', call_id: call.call_id, output: NOT_EXECUTED });
+            emit(toolEvent(catalog, call, 'error'));
+            cancelRemaining(calls.slice(index + 1));
+            return { kind: 'interrupted', continuation: snapshot() };
+          }
+          const outcome = await runCallOutcome(catalog, call);
+          emit(toolEvent(catalog, call, outcome.failed ? 'error' : 'done'));
+          appendGenerated({ type: 'function_call_output', call_id: call.call_id, output: outcome.output });
+          if (outcome.uncertainEffects) {
+            cancelRemaining(calls.slice(index + 1));
+            return {
+              kind: 'failed', uncertainEffects: true, continuation: snapshot(),
+              error: 'A tool outcome could not be confirmed. Check its result before retrying; queued instructions were not resumed.',
+            };
+          }
+        }
+        if (hadText && !lifetime.signal.aborted) {
+          countGenerated('\n\n');
+          emit({ type: 'delta', text: '\n\n' });
+        }
+      }
+      if (lifetime.signal.aborted) return { kind: 'interrupted', continuation: snapshot() };
+      return { kind: 'failed', error: 'Stopped after too many tool calls in one reply.', continuation: snapshot() };
+    } catch (err) {
+      // Preserve a valid protocol checkpoint, even if interruption arrived before response.completed.
+      if (checkpoint) {
+        try {
+          saveText();
+          cancelRemaining(checkpoint.calls);
+        } catch {
+          // The size limit takes precedence; already-emitted fragments remain in the task projection.
+          return { kind: 'failed', error: err.message || 'Task context exceeded its limit.' };
+        }
+      }
+      if (lifetime.signal.aborted && err.code !== 'TASK_CONTEXT_LIMIT') return { kind: 'interrupted', continuation: snapshot() };
+      return { kind: 'failed', error: err.message || 'Could not reach ChatGPT.', continuation: snapshot() };
+    } finally {
+      finished = true;
+      http?.abort();
+      http = null;
+    }
+  })();
+  return { settled, interrupt: cancel, stop: cancel };
+}
+
+/** Legacy renderer transport, kept compatible while tasks take ownership of lifecycle. */
+async function streamResponse(payload, emit, signal, getTools = tools.catalog) {
+  const attempt = openAttempt({ request: payload, updates: [] }, emit, getTools);
+  const abort = () => attempt.stop();
+  signal?.addEventListener('abort', abort, { once: true });
+  if (signal?.aborted) abort();
+  try {
+    const result = await attempt.settled;
+    emit(result.kind === 'complete' ? { type: 'done' } : {
+      type: 'error', message: result.kind === 'interrupted' ? 'Stopped.' : result.error,
+    });
+  } finally {
+    signal?.removeEventListener('abort', abort);
   }
 }
 
@@ -245,4 +379,4 @@ function registerIpc(ipcMain) {
   ipcMain.handle('chatgpt:abort', (_event, requestId) => inflight.get(requestId)?.abort());
 }
 
-module.exports = { registerIpc, validateRequest, sseEvents, functionTools, runCall, toolEvent, streamResponse, USAGE_ERRORS };
+module.exports = { registerIpc, validateRequest, sseEvents, functionTools, runCall, toolEvent, streamResponse, openAttempt, USAGE_ERRORS };

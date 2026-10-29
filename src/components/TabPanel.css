@@ -1,4 +1,4 @@
-/* Workspace: optional tab panel (left) beside the main chat (right) */
+/* Workspace: main chat (left) with an optional tab panel (right) */
 .workspace {
   flex: 1;
   min-height: 0;
@@ -13,14 +13,21 @@
 }
 
 .workspace.split .chat-pane {
-  flex: 0 0 42%;
   min-width: 360px;
+}
+
+/* Beside the chat the panel takes the larger share; in full view it is the only child and fills. */
+.workspace.split > .tab-panel:not(:only-child) {
+  flex: 0 0 55%;
+  min-width: 360px;
+  max-width: calc(100% - 360px);
   border-left: 1px solid var(--border);
 }
 
 .tab-panel {
   flex: 1;
   min-width: 0;
+  position: relative;
   display: flex;
   flex-direction: column;
   background: var(--bg-main);
@@ -327,12 +334,6 @@
 .mac-titlebar .tab,
 .mac-titlebar .newtab-menu {
   -webkit-app-region: no-drag;
-}
-
-/* Room for the traffic lights in whichever row is top-left. */
-.mac-titlebar .sidebar-closed .main > .topbar,
-.mac-titlebar .sidebar-closed .tab-strip {
-  padding-left: 84px;
 }
 
 .newtab-dropdown .menu-option-label svg {

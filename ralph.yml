@@ -1,0 +1,41 @@
+# Ralph Orchestrator 2.10.1 — Jarvis / Codex
+# Use the custom adapter: the built-in Codex adapter adds --yolo.
+cli:
+  backend: custom
+  command: codex
+  args: [exec, --sandbox, workspace-write]
+  prompt_mode: arg
+
+event_loop:
+  prompt_file: PROMPT.md
+  completion_promise: LOOP_COMPLETE
+  max_iterations: 20
+  max_runtime_seconds: 3600
+
+core:
+  scratchpad: .ralph/agent/scratchpad.md
+  specs_dir: .ralph/specs/
+  guardrails:
+    - "Read applicable AGENTS.md and lessons.md before working."
+    - "Implement only the requested task; preserve unrelated working-tree changes."
+    - "Do not stage, commit, push, deploy, or publish unless explicitly requested. Keep authorized commit messages concise."
+    - "Plan tasks with three or more steps before implementation; record unresolved questions."
+    - "Run relevant tests during implementation. Before LOOP_COMPLETE, run npm run ralph:verify and record the results. Never claim failing checks passed."
+    - "For frontend work, follow the project's frontend skill and localhost screenshot requirements."
+    - "Keep responses concise and implementation code readable."
+
+features:
+  parallel: false
+  auto_merge: false
+  preflight:
+    enabled: true
+    strict: false
+
+hooks:
+  enabled: true
+  events:
+    pre.loop.complete:
+      - name: jarvis-checks
+        command: [npm, run, ralph:verify]
+        timeout_seconds: 300
+        on_error: block

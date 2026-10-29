@@ -77,6 +77,14 @@ function decodeJwt(token) {
   };
 }
 
+/** Display-only profile metadata; never used to decide whether an account is authenticated. */
+function profileName(claims) {
+  const text = (value) => typeof value === 'string' ? value.trim() : '';
+  const full = text(claims?.name);
+  const parts = [text(claims?.given_name), text(claims?.family_name)].filter(Boolean).join(' ');
+  return (full || parts).slice(0, 120) || null;
+}
+
 /** Verifies an RS256/ES256 JWT signature against a JWKS document. */
 function verifyJwtSignature(token, jwks) {
   const { header, signingInput, signature } = decodeJwt(token);
@@ -126,6 +134,7 @@ module.exports = {
   buildAuthorizeUrl,
   parseCallback,
   decodeJwt,
+  profileName,
   verifyJwtSignature,
   checkIdTokenClaims,
   grantedScopes,

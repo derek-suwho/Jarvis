@@ -6,14 +6,14 @@ export type ClaudeState =
   | { phase: 'loading' }
   | { phase: 'not-installed' }
   | { phase: 'signed-out'; waiting: boolean; error?: string }
-  | { phase: 'connected'; email: string | null; plan: string | null };
+  | { phase: 'connected'; name?: string | null; email: string | null; plan: string | null; notice?: string };
 
 const POLL_MS = 2000;
 const POLL_LIMIT_MS = 5 * 60 * 1000;
 
 function fromStatus(s: ClaudeStatus): ClaudeState {
   if (!s.installed) return { phase: 'not-installed' };
-  return s.connected ? { phase: 'connected', email: s.email, plan: s.plan } : { phase: 'signed-out', waiting: false };
+  return s.connected ? { phase: 'connected', name: s.name ?? null, email: s.email, plan: s.plan } : { phase: 'signed-out', waiting: false };
 }
 
 /** Claude through the user's own Claude Code; sign-in happens in Claude Code's terminal login. */
@@ -70,13 +70,24 @@ export function useClaude() {
     }, POLL_MS);
   }, [bridge, refresh]);
 
-  const signOut = useCallback(async () => {
-    if (!bridge) return;
+  const signOut = useCallback(async (): Promise<boolean> => {
+    if (!bridge) return false;
     stopPolling();
-    const res = await bridge.signOut();
-    if (res.ok) await refresh();
-    else setState({ phase: 'signed-out', waiting: false, error: res.error });
-  }, [bridge, refresh]);
+    const failed = (message: string) => {
+      setState((previous) => previous.phase === 'connected'
+        ? { ...previous, notice: message }
+        : { phase: 'signed-out', waiting: false, error: message });
+      return false;
+    };
+    try {
+      const res = await bridge.signOut();
+      if (!res.ok) return failed(res.error || 'Claude Code could not sign out. Try again.');
+      setState({ phase: 'signed-out', waiting: false });
+      return true;
+    } catch {
+      return failed('Could not confirm Claude Code signed out. Try again.');
+    }
+  }, [bridge]);
 
   return { state, signIn, signOut, refresh };
 }

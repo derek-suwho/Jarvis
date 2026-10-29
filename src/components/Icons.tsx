@@ -20,8 +20,8 @@ function Svg({ children, size = 18 }: { children: ReactNode; size?: number }) {
 
 export const ComposeIcon = () => (
   <Svg>
-    <path d="M12 20h9" />
-    <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+    <path d="M12 4H7a3 3 0 0 0-3 3v10a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-5" />
+    <path d="M18.4 3.6a2 2 0 0 1 2.9 2.9L13 14.8l-3.6.8.8-3.6Z" />
   </Svg>
 );
 
@@ -37,6 +37,30 @@ export const SidebarIcon = () => (
     <rect x="3" y="4" width="18" height="16" rx="2" />
     <path d="M9 4v16" />
   </Svg>
+);
+
+export const HomeIcon = () => (
+  <Svg><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1Z" /></Svg>
+);
+
+export const ChatsIcon = () => (
+  <Svg><rect x="7" y="7" width="14" height="14" rx="3" /><path d="M7 17H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v2" /></Svg>
+);
+
+export const HistoryIcon = () => (
+  <Svg><circle cx="12" cy="12" r="9" /><path d="M12 6v6l-4 3" /></Svg>
+);
+
+export const HelpIcon = () => (
+  <Svg><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="4" /><path d="m5.6 5.6 3.6 3.6m5.6 5.6 3.6 3.6m0-12.8-3.6 3.6m-5.6 5.6-3.6 3.6" /></Svg>
+);
+
+export const LogOutIcon = () => (
+  <Svg><path d="M9 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4m6-13 5 5-5 5m-7-5h12" /></Svg>
+);
+
+export const UserIcon = () => (
+  <Svg><circle cx="12" cy="8" r="3" /><path d="M5 21v-2a7 7 0 0 1 14 0v2" /></Svg>
 );
 
 export const PlusIcon = () => (

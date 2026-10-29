@@ -1,5 +1,9 @@
+import type { ReplyMessage } from './replyContext';
+import type { TasksBridge } from '../shared/tasks';
+
 export interface ChatGPTStatus {
   connected: boolean;
+  name?: string | null;
   email: string | null;
   registered: boolean;
 }
@@ -27,16 +31,35 @@ export type ChatGPTStreamEvent =
 export interface ClaudeStatus {
   installed: boolean;
   connected: boolean;
+  name?: string | null;
   email: string | null;
   plan: string | null;
 }
+
+export interface SubscriptionAuthStatus {
+  installed: boolean;
+  connected: boolean;
+  name: string | null;
+  email: string | null;
+  plan: string | null;
+  error?: string;
+}
+
+export interface SubscriptionAuthBridge {
+  status: () => Promise<SubscriptionAuthStatus>;
+  signIn: () => Promise<{ ok: boolean; error?: string }>;
+  cancel: () => Promise<void>;
+  signOut: () => Promise<{ ok: boolean; error?: string }>;
+}
+
+export type SubscriptionProviderBridge = SubscriptionAuthBridge & StreamBridge<{ model: string; messages: ReplyMessage[] }>;
 
 export interface ClaudeStreamPayload {
   model: string;
   mode: 'chat' | 'code';
   reasoning: string;
   conversationId: string;
-  messages: { role: 'user' | 'assistant'; content: string }[];
+  messages: ReplyMessage[];
 }
 
 export interface ToolServer {
@@ -83,6 +106,7 @@ export type ChatGPTSignInResult = { ok: true; status: ChatGPTStatus } | { ok: fa
 
 /** Bridge exposed by electron/preload.cjs; absent when running in a normal browser. */
 interface JarvisBridge {
+  tasks?: TasksBridge;
   isDesktop: true;
   platform: string;
   openExternal: (url: string) => Promise<void>;
@@ -92,7 +116,7 @@ interface JarvisBridge {
     cancel: () => Promise<void>;
     signOut: () => Promise<{ ok: boolean; revoked: boolean }>;
     models: () => Promise<ChatGPTModel[]>;
-    stream: (requestId: string, payload: { model: string; messages: { role: 'user' | 'assistant'; content: string }[] }) => Promise<void>;
+    stream: (requestId: string, payload: { model: string; messages: ReplyMessage[] }) => Promise<void>;
     abort: (requestId: string) => Promise<void>;
     onStreamEvent: (listener: (requestId: string, event: ChatGPTStreamEvent) => void) => () => void;
   };
@@ -101,6 +125,8 @@ interface JarvisBridge {
     signIn: () => Promise<{ ok: boolean; error?: string }>;
     signOut: () => Promise<{ ok: boolean; error?: string }>;
   };
+  gemini?: SubscriptionProviderBridge;
+  grok?: SubscriptionProviderBridge;
   tools: {
     state: () => Promise<ToolsState>;
     scan: () => Promise<ToolsScan>;

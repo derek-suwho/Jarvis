@@ -1,10 +1,34 @@
-const { app, BrowserWindow, Menu, dialog, ipcMain, nativeTheme, shell } = require('electron');
+const { app, BrowserWindow, Menu, Notification, dialog, ipcMain, nativeTheme, shell } = require('electron');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const chatgptAuth = require('./chatgpt-auth.cjs');
 const chatgptInference = require('./chatgpt-inference.cjs');
 const claudeCode = require('./claude-code.cjs');
+const geminiCli = require('./gemini-cli.cjs');
+const grokCli = require('./grok-cli.cjs');
+const { registerSubscriptionStream } = require('./subscription-stream.cjs');
 const tools = require('./tools/index.cjs');
+const { createTaskCoordinator } = require('./tasks/coordinator.cjs');
+const { createTaskNotifications } = require('./tasks/notifications.cjs');
+const { registerTaskIpc } = require('./tasks/ipc.cjs');
+const { openPreviewAttempt } = require('./tasks/preview.cjs');
+const appWindows = new Set();
+const readyWindows = new Set();
+let pendingTarget = null;
+let taskRuntime;
+
+const focusedApp = () => [...appWindows].some((win) => !win.isDestroyed() && win.isFocused());
+const isTrustedSender = (event) => [...appWindows].some((win) => !win.isDestroyed()
+  && win.webContents === event.sender && event.senderFrame === event.sender.mainFrame);
+function openTaskTarget(target) {
+  let win = [...appWindows].find((item) => !item.isDestroyed());
+  if (!win) win = createWindow();
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+  if (readyWindows.has(win.webContents.id)) win.webContents.send('tasks:open-target', target);
+  else pendingTarget = target;
+}
 
 function isHttpUrl(url) {
   try {
@@ -38,6 +62,17 @@ function createWindow() {
       webviewTag: true,
     },
   });
+  appWindows.add(win);
+  const ownerId = win.webContents.id;
+  win.webContents.on('did-start-loading', () => {
+    readyWindows.delete(ownerId);
+    taskRuntime?.destroyOwner(ownerId);
+  });
+  win.on('closed', () => {
+    readyWindows.delete(ownerId);
+    appWindows.delete(win);
+    taskRuntime?.destroyOwner(ownerId);
+  });
 
   const devUrl = process.env.VITE_DEV_SERVER_URL;
   if (devUrl) win.loadURL(devUrl);
@@ -51,6 +86,7 @@ function createWindow() {
   win.webContents.on('will-navigate', (event, url) => {
     if (url !== win.webContents.getURL()) event.preventDefault();
   });
+  return win;
 }
 
 app.on('web-contents-created', (_event, contents) => {
@@ -159,11 +195,67 @@ app.whenReady().then(() => {
   chatgptAuth.registerIpc(ipcMain);
   chatgptInference.registerIpc(ipcMain);
   claudeCode.registerIpc(ipcMain);
+  const accountIpc = {
+    handle: (channel, handler) => ipcMain.handle(channel, (event, ...args) => {
+      if (!isTrustedSender(event)) throw new Error('Untrusted account request.');
+      return handler(event, ...args);
+    }),
+  };
+  for (const [provider, adapter] of [['gemini', geminiCli], ['grok', grokCli]]) {
+    adapter.registerIpc(accountIpc);
+    registerSubscriptionStream(ipcMain, provider, adapter, isTrustedSender);
+  }
   tools.registerIpc(ipcMain);
+  const notifications = createTaskNotifications({
+    isFocused: focusedApp,
+    openTarget: openTaskTarget,
+    createNotification: (options) => Notification.isSupported() ? new Notification(options) : null,
+  });
+  taskRuntime = createTaskCoordinator({
+    isFocused: focusedApp,
+    emit: (event) => {
+      for (const win of appWindows) if (!win.isDestroyed()) win.webContents.send('tasks:event', event);
+    },
+    onOutcome: (task) => notifications.outcome(task),
+    openAttempt: (input, emit) => input.provider === 'claude' ? claudeCode.openAttempt(input, emit)
+      : input.provider === 'chatgpt' ? chatgptInference.openAttempt(input, emit)
+      : input.provider === 'gemini' ? geminiCli.openAttempt(input, emit)
+      : input.provider === 'grok' ? grokCli.openAttempt(input, emit) : openPreviewAttempt(input, emit),
+  });
+  registerTaskIpc(ipcMain, taskRuntime, {
+    notifications,
+    isTrusted: isTrustedSender,
+    ready: (sender) => {
+      readyWindows.add(sender.id);
+      if (pendingTarget) {
+        sender.send('tasks:open-target', pendingTarget);
+        pendingTarget = null;
+      }
+    },
+  });
   buildMenu();
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
+});
+
+let providerShutdown = null;
+let providersStopped = false;
+app.on('before-quit', (event) => {
+  if (providersStopped) return;
+  event.preventDefault();
+  if (providerShutdown) return;
+  taskRuntime?.shutdown();
+  let deadline;
+  const timeout = new Promise((resolve) => { deadline = setTimeout(resolve, 5000); });
+  providerShutdown = Promise.race([
+    Promise.allSettled([geminiCli.shutdown(), grokCli.shutdown()]),
+    timeout,
+  ]).finally(() => {
+    clearTimeout(deadline);
+    providersStopped = true;
+    app.quit();
   });
 });
 

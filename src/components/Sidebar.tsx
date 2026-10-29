@@ -2,55 +2,74 @@ import type { CSSProperties } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import type { Chat } from '../lib/chats';
 import { groupChats, recentChats } from '../lib/chats';
-import { initials } from '../lib/preferences';
+import { isMac } from '../lib/desktop';
 import type { Project } from '../lib/projects';
 import type { ChatActions } from './ChatMenu';
+import type { TaskSnapshot } from '../shared/tasks';
+import { TaskStatus } from './TasksPanel';
 import { ChatMenu } from './ChatMenu';
-import { ComposeIcon, FolderIcon, GearIcon, SearchIcon, SidebarIcon, SmallPlusIcon } from './Icons';
+import { ResizeHandle, useStoredWidth } from './ResizeHandle';
+import { ChevronRightIcon, ComposeIcon, FolderIcon, SearchIcon, SmallPlusIcon } from './Icons';
 
 interface Props extends ChatActions {
   chats: Chat[];
+  tasks?: TaskSnapshot[];
   projects: Project[];
   activeId: string | null;
   activeProjectId: string | null;
   /** Chat whose title is being edited inline. */
   renamingId: string | null;
-  userName: string;
-  subscriptionCount: number;
   onNewChat: () => void;
   onSelect: (id: string) => void;
   onSelectProject: (id: string) => void;
   onCreateProject: (name: string) => void;
   onRenameDone: (id: string, title: string | null) => void;
   onSearch: () => void;
-  onCollapse: () => void;
-  onOpenSettings: () => void;
 }
 
 function RenameInput({ initial, onDone }: { initial: string; onDone: (v: string | null) => void }) {
   const [value, setValue] = useState(initial);
   const ref = useRef<HTMLInputElement>(null);
+  const done = useRef(false);
   useEffect(() => ref.current?.select(), []);
+  const finish = (next: string | null) => {
+    if (done.current) return;
+    done.current = true;
+    onDone(next);
+  };
   return (
     <input
       ref={ref}
+      autoFocus
+      aria-label={initial ? 'Conversation name' : 'Project name'}
       className="rename-input"
       value={value}
       onChange={(e) => setValue(e.target.value)}
       onClick={(e) => e.stopPropagation()}
-      onBlur={() => onDone(value)}
+      onBlur={() => finish(value)}
       onKeyDown={(e) => {
-        if (e.key === 'Enter') onDone(value);
-        if (e.key === 'Escape') onDone(null);
+        if (e.key === 'Enter') finish(value);
+        if (e.key === 'Escape') finish(null);
       }}
     />
   );
 }
 
+const PROJECTS_OPEN_KEY = 'jarvis.projectsOpen';
 export function Sidebar(p: Props) {
   const [creating, setCreating] = useState(false);
+  const [width, setWidth] = useStoredWidth('jarvis.sidebarWidth', 200, 480);
+  const asideRef = useRef<HTMLElement>(null);
+  const [projectsOpen, setProjectsOpen] = useState(() => {
+    try { return localStorage.getItem(PROJECTS_OPEN_KEY) !== 'false'; } catch { return true; }
+  });
+  const toggleProjects = (open: boolean) => {
+    setProjectsOpen(open);
+    try { localStorage.setItem(PROJECTS_OPEN_KEY, String(open)); } catch { /* keep in memory only */ }
+  };
   const groups = groupChats(recentChats(p.chats));
-  const { projects, activeId, renamingId } = p;
+  const { projects, activeId } = p;
+  const modifier = isMac() ? '⌘' : 'Ctrl';
   const actions: ChatActions = {
     onRename: p.onRename,
     onTogglePin: p.onTogglePin,
@@ -62,38 +81,36 @@ export function Sidebar(p: Props) {
   let index = 0;
 
   return (
-    <aside className="sidebar">
+    <aside ref={asideRef} id="chat-history" className="sidebar" aria-label="Chat history" style={width ? ({ '--sidebar-width': `${width}px` } as CSSProperties) : undefined}>
+      <ResizeHandle label="Resize sidebar" edge="right" measure={() => asideRef.current?.offsetWidth ?? 256} onResize={setWidth} onReset={() => setWidth(null)} />
       <div className="sidebar-header drag-region">
         <span className="brand">
-          <span className="brand-mark">J</span>
           Jarvis
         </span>
         <div className="header-actions">
-          <button className="icon-btn" title="Close sidebar" onClick={p.onCollapse}>
-            <SidebarIcon />
+          <button className="icon-btn" aria-label="Search chats" title={`Search chats (${modifier}K)`} onClick={p.onSearch}>
+            <SearchIcon />
           </button>
         </div>
       </div>
 
-      <button className="nav-item" onClick={p.onNewChat}>
+      <button className="nav-item" aria-label="New chat" onClick={p.onNewChat}>
         <ComposeIcon />
         <span>New chat</span>
-        <span className="kbd nav-kbd">⇧⌘O</span>
-      </button>
-      <button className="nav-item" onClick={p.onSearch}>
-        <SearchIcon />
-        <span>Search chats</span>
-        <span className="kbd nav-kbd">⌘K</span>
+        <span className="kbd nav-kbd">{isMac() ? '⇧⌘O' : 'Ctrl ⇧ O'}</span>
       </button>
 
-      <nav className="history">
+      <nav className="history" aria-label="Projects and conversations">
         <div className="section-label section-row">
-          <span>Projects</span>
-          <button className="icon-btn section-add" title="New project" onClick={() => setCreating(true)}>
+          <button className={`section-toggle${projectsOpen ? ' open' : ''}`} aria-expanded={projectsOpen} onClick={() => toggleProjects(!projectsOpen)}>
+            Projects
+            <ChevronRightIcon />
+          </button>
+          <button className="icon-btn section-add" title="New project" onClick={() => { toggleProjects(true); setCreating(true); }}>
             <SmallPlusIcon />
           </button>
         </div>
-        {creating && (
+        {projectsOpen && creating && (
           <div className="history-item">
             <FolderIcon />
             <RenameInput
@@ -105,18 +122,20 @@ export function Sidebar(p: Props) {
             />
           </div>
         )}
-        {projects.map((pr) => (
-          <div
+        {projectsOpen && projects.map((pr) => (
+          <button
             key={pr.id}
             className={`history-item project-item${pr.id === p.activeProjectId ? ' active' : ''}`}
+            aria-current={pr.id === p.activeProjectId ? 'page' : undefined}
+            title={pr.name}
             onClick={() => p.onSelectProject(pr.id)}
           >
             <FolderIcon />
             <span className="history-title">{pr.name}</span>
             <span className="mono">{p.chats.filter((c) => c.projectId === pr.id && !c.archived).length || ''}</span>
-          </div>
+          </button>
         ))}
-        {projects.length === 0 && !creating && (
+        {projectsOpen && projects.length === 0 && !creating && (
           <button className="history-item ghost" onClick={() => setCreating(true)}>
             <SmallPlusIcon />
             <span className="history-title">New project</span>
@@ -137,13 +156,16 @@ export function Sidebar(p: Props) {
                 key={c.id}
                 className={`history-item${c.id === activeId ? ' active' : ''}`}
                 style={{ '--i': index++ } as CSSProperties}
-                onClick={() => p.onSelect(c.id)}
               >
-                {renamingId === c.id ? (
-                  <RenameInput initial={c.title} onDone={(v) => p.onRenameDone(c.id, v)} />
-                ) : (
+                <button
+                  className="history-select"
+                  title={c.title}
+                  aria-current={c.id === activeId ? 'page' : undefined}
+                  onClick={() => p.onSelect(c.id)}
+                >
                   <span className="history-title">{c.title}</span>
-                )}
+                  <TaskStatus task={p.tasks?.find((task) => task.target.kind === 'chat' && task.target.id === c.id)} />
+                </button>
                 <ChatMenu chat={c} projects={projects} {...actions} />
               </div>
             ))}
@@ -151,18 +173,6 @@ export function Sidebar(p: Props) {
         ))}
       </nav>
 
-      <div className="sidebar-footer">
-        <button className="profile-btn" onClick={p.onOpenSettings} title="Settings (⌘,)">
-          <span className="avatar">{initials(p.userName)}</span>
-          <span className="profile-text">
-            <span className="profile-name">{p.userName.trim() || 'You'}</span>
-            <span className="profile-plan">
-              {p.subscriptionCount === 0 ? 'Add your AI plans' : `${p.subscriptionCount} plan${p.subscriptionCount > 1 ? 's' : ''} linked`}
-            </span>
-          </span>
-          <GearIcon />
-        </button>
-      </div>
     </aside>
   );
 }

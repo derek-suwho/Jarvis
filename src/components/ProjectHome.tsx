@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import type { Chat } from '../lib/chats';
 import { sortByRecent } from '../lib/chats';
 import type { Project } from '../lib/projects';
-import { SideChatIcon } from './Icons';
+import { FolderIcon, PencilIcon, SideChatIcon } from './Icons';
+import { RenameDialog } from './RenameDialog';
 
 interface Props {
   project: Project;
@@ -17,6 +18,7 @@ export function ProjectHome({ project, chats, onSelect, onChange, onDelete }: Pr
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(project.instructions);
   const [armed, setArmed] = useState(false);
+  const [renaming, setRenaming] = useState(false);
   const list = sortByRecent(chats.filter((c) => c.projectId === project.id && !c.archived));
 
   useEffect(() => {
@@ -27,6 +29,16 @@ export function ProjectHome({ project, chats, onSelect, onChange, onDelete }: Pr
 
   return (
     <div className="project-home">
+      <div className="project-summary">
+        <span>
+          <FolderIcon />
+          {list.length} {list.length === 1 ? 'conversation' : 'conversations'}
+        </span>
+        <button className="text-btn" onClick={() => setRenaming(true)}>
+          <PencilIcon />
+          Rename project
+        </button>
+      </div>
       <div className="project-card">
         <div className="project-card-head">
           <span>Instructions</span>
@@ -39,6 +51,7 @@ export function ProjectHome({ project, chats, onSelect, onChange, onDelete }: Pr
         {editing ? (
           <>
             <textarea
+              aria-label="Project instructions"
               className="settings-textarea"
               rows={5}
               autoFocus
@@ -48,7 +61,13 @@ export function ProjectHome({ project, chats, onSelect, onChange, onDelete }: Pr
               onChange={(e) => setDraft(e.target.value)}
             />
             <div className="edit-actions">
-              <button className="pill-btn" onClick={() => setEditing(false)}>
+              <button
+                className="pill-btn"
+                onClick={() => {
+                  setDraft(project.instructions);
+                  setEditing(false);
+                }}
+              >
                 Cancel
               </button>
               <button
@@ -79,7 +98,9 @@ export function ProjectHome({ project, chats, onSelect, onChange, onDelete }: Pr
               <button onClick={() => onSelect(c.id)}>
                 <SideChatIcon />
                 <span className="history-title">{c.title}</span>
-                <span className="mono">{new Date(c.updatedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
+                <span className="mono">
+                  {new Date(c.updatedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                </span>
               </button>
             </li>
           ))}
@@ -92,6 +113,17 @@ export function ProjectHome({ project, chats, onSelect, onChange, onDelete }: Pr
       >
         {armed ? 'Click again — chats move back to Recents' : 'Delete project'}
       </button>
+      {renaming && (
+        <RenameDialog
+          title="Rename project"
+          initialValue={project.name}
+          onClose={() => setRenaming(false)}
+          onSave={(name) => {
+            onChange({ name });
+            setRenaming(false);
+          }}
+        />
+      )}
     </div>
   );
 }

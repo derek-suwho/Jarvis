@@ -10,3 +10,17 @@
 
 - Keep implementation code readable and multiline. Concise conversation and commit instructions do not authorize compressed control flow.
 - Validate evidence polarity against the complete source utterance. Model-selected substrings can strip negation or later rejection; exact quotation alone does not establish affirmative support.
+- Trace every UI capability to its actual provider payload. File chips and saved instructions do not prove files or instructions reach the model.
+- Freeze contextual instructions with side-chat snapshots; resolve existing-chat scope independently of the last project home. Clear temporary drafts on every exit path.
+- Validate the complete serialized request against provider limits before clearing a draft; individual attachment limits alone are insufficient.
+- Distinguish queued messages from explicit interruption. Queue by default; only apply mid-run when the user chooses interruption. Scope background work to the requested app lifecycle before adding durable workers.
+- Trace provider execution separately from output delivery: a destroyed renderer can lose results while backend work continues. Do not infer cancellation from missing output.
+- When moving attachments to binary storage, migrate every previously accepted MIME alias before stripping inline data; verify migration through reload.
+- Vite refreshes renderer code, not Electron's loaded main process. Restart the actual desktop app after backend changes; verify media through real preload/IPC and a live response before declaring the integration working.
+- Verify the exact npm command users will run; individually valid CLI flags can conflict. Ralph's `--autonomous` and `--no-tui` are mutually exclusive.
+- Resolve profile identity from saved preferences or connected account metadata; never leave a signed-in person's profile labeled You. Keep global navigation separate from scrolling chat history when the reference does.
+- Gate provider plan controls and model availability on verified sign-in; a locally selected plan or opened login page is not an authenticated account.
+- Check CLI auth parsers against published or observed output, including login preludes and trailing failures. Mock success alone does not prove live compatibility.
+- Serialize login/logout with status checks, and wait for owned provider processes during app shutdown. Do not block normal user configuration merely because it exists; restrict actual executable capabilities.
+- Verify skill invocation in the user's actual client. Codex CLI uses `$name` or `/skills`; a skill file does not register a `/<name>` CLI command. Distinguish file validation from picker discovery.
+- Keep requested local apps independent of managed exec sessions: detach the launcher, redirect stdio to a log, and verify it survives the launching shell before reporting it running. Record PID and log path for diagnosis.

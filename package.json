@@ -10,29 +10,44 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:ui": "node scripts/check-navigation.mjs && node scripts/check-chat-flows.mjs && node scripts/check-stream-flows.mjs",
+    "test:media": "node scripts/check-media-flows.mjs && node scripts/check-media-persistence.mjs && node scripts/check-electron-media.mjs",
     "typecheck:backend": "tsc -p tsconfig.backend.json",
-    "test:backend": "vitest run tests/storage tests/memory"
+    "test:backend": "vitest run tests/storage tests/memory",
+    "ralph": "ralph",
+    "ralph:check": "ralph preflight",
+    "ralph:dry-run": "ralph run --dry-run",
+    "ralph:run": "ralph run --autonomous",
+    "ralph:verify": "npm test && npm run build && npm run typecheck:backend"
   },
   "dependencies": {
     "@fontsource-variable/geist": "5.2.8",
     "@fontsource-variable/geist-mono": "5.2.7",
     "@modelcontextprotocol/sdk": "1.32.1",
     "better-sqlite3": "13.0.3",
+    "katex": "0.16.22",
+    "mermaid": "11.6.0",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "smol-toml": "1.9.1"
   },
   "devDependencies": {
+    "@ralph-orchestrator/ralph-cli": "2.10.1",
     "@types/better-sqlite3": "9.6.0",
+    "@types/katex": "0.16.7",
     "@types/node": "22.20.5",
     "@types/react": "18.3.23",
     "@types/react-dom": "18.3.7",
     "@vitejs/plugin-react": "4.5.2",
     "electron": "44.6.0",
+    "puppeteer": "^25.15.0",
     "tsx": "4.23.15",
     "typescript": "5.8.3",
     "vite": "6.3.5",
     "vitest": "3.2.4"
   },
-  "main": "electron/main.cjs"
+  "main": "electron/main.cjs",
+  "allowScripts": {
+    "@ralph-orchestrator/ralph-cli@2.10.1": true
+  }
 }

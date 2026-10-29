@@ -1,9 +1,52 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
+function subscriptionProvider(provider) {
+  return {
+    status: () => ipcRenderer.invoke(`${provider}:status`),
+    signIn: () => ipcRenderer.invoke(`${provider}:sign-in`),
+    cancel: () => ipcRenderer.invoke(`${provider}:cancel`),
+    signOut: () => ipcRenderer.invoke(`${provider}:sign-out`),
+    stream: (requestId, payload) => ipcRenderer.invoke(`${provider}:stream`, requestId, payload),
+    abort: (requestId) => ipcRenderer.invoke(`${provider}:abort`, requestId),
+    onStreamEvent: (listener) => {
+      const handler = (_event, requestId, message) => listener(requestId, message);
+      ipcRenderer.on(`${provider}:stream-event`, handler);
+      return () => ipcRenderer.removeListener(`${provider}:stream-event`, handler);
+    },
+  };
+}
+
 // The only desktop capabilities the renderer gets.
 contextBridge.exposeInMainWorld('jarvis', {
   isDesktop: true,
   platform: process.platform,
+  gemini: subscriptionProvider('gemini'),
+  grok: subscriptionProvider('grok'),
+  tasks: {
+    start: (input) => ipcRenderer.invoke('tasks:start', input),
+    queue: (input) => ipcRenderer.invoke('tasks:queue', input),
+    removeQueued: (input) => ipcRenderer.invoke('tasks:removeQueued', input),
+    interrupt: (id) => ipcRenderer.invoke('tasks:interrupt', id),
+    stop: (id) => ipcRenderer.invoke('tasks:stop', id),
+    snapshot: () => ipcRenderer.invoke('tasks:snapshot'),
+    ack: (input) => ipcRenderer.invoke('tasks:ack', input),
+    forgetTarget: (target) => ipcRenderer.invoke('tasks:forgetTarget', target),
+    detach: (ids) => ipcRenderer.invoke('tasks:detach', ids),
+    markRead: (id) => ipcRenderer.invoke('tasks:markRead', id),
+    setVisibleTargets: (targets) => ipcRenderer.invoke('tasks:setVisibleTargets', targets),
+    setPreferences: (prefs) => ipcRenderer.invoke('tasks:preferences', prefs),
+    ready: () => ipcRenderer.invoke('tasks:ready'),
+    onEvent: (listener) => {
+      const handler = (_event, message) => listener(message);
+      ipcRenderer.on('tasks:event', handler);
+      return () => ipcRenderer.removeListener('tasks:event', handler);
+    },
+    onOpenTarget: (listener) => {
+      const handler = (_event, target) => listener(target);
+      ipcRenderer.on('tasks:open-target', handler);
+      return () => ipcRenderer.removeListener('tasks:open-target', handler);
+    },
+  },
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
   // ChatGPT account: status and sign-in/out only. Tokens stay in the main process.
   chatgpt: {

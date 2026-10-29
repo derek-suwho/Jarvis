@@ -15,6 +15,8 @@ export interface BrowserState {
  */
 export interface SideChatState {
   sourceTitle: string | null;
+  /** Project scope is frozen with the source conversation. */
+  projectInstructions?: string;
   context: Message[];
   messages: Message[];
 }
@@ -29,11 +31,19 @@ export function createBrowserTab(): Tab {
   return { id: newId(), kind: 'browser', browser: { history: [], index: -1, reloadKey: 0 } };
 }
 
-export function createSideChat(source: { title: string; messages: Message[] } | null): Tab {
+export function createSideChat(
+  source: { title: string; messages: Message[] } | null,
+  projectInstructions?: string,
+): Tab {
   return {
     id: newId(),
     kind: 'sidechat',
-    sidechat: { sourceTitle: source?.title ?? null, context: source ? [...source.messages] : [], messages: [] },
+    sidechat: {
+      sourceTitle: source?.title ?? null,
+      context: source ? [...source.messages] : [],
+      messages: [],
+      ...(projectInstructions ? { projectInstructions } : {}),
+    },
   };
 }
 
@@ -69,7 +79,8 @@ export function normalizeUrl(input: string): string | null {
       return null;
     }
   }
-  const looksLikeHost = !/\s/.test(text) && (/^[^/]+\.[a-z]{2,}(?::\d+)?(\/.*)?$/i.test(text) || /^localhost(:\d+)?(\/.*)?$/i.test(text));
+  const looksLikeHost =
+    !/\s/.test(text) && (/^[^/]+\.[a-z]{2,}(?::\d+)?(\/.*)?$/i.test(text) || /^localhost(:\d+)?(\/.*)?$/i.test(text));
   if (looksLikeHost) {
     const scheme = text.startsWith('localhost') ? 'http://' : 'https://';
     try {

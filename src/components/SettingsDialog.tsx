@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import type { Chat } from '../lib/chats';
 import type { Preferences, Theme } from '../lib/preferences';
 import { THEMES } from '../lib/preferences';
@@ -6,14 +6,18 @@ import type { Subscriptions } from '../lib/subscriptions';
 import { PROVIDERS, setPlan } from '../lib/subscriptions';
 import type { ChatGPTAccount } from '../lib/useChatGPT';
 import type { ClaudeAccount } from '../lib/useClaude';
+import type { SubscriptionAccount } from '../lib/useSubscriptionAccount';
+import { SubscriptionConnection, SubscriptionStatusLine } from './SubscriptionAccount';
 import { ChatGPTConnection, ChatGPTStatusLine } from './ChatGPTAccount';
 import { ClaudeConnection, ClaudeStatusLine } from './ClaudeAccount';
-import { CloseIcon, SmallPlusIcon } from './Icons';
+import { CloseIcon } from './Icons';
 import { SiteIcon } from './SiteIcon';
 import { ToolsPanel } from './ToolsPanel';
+import { isMac, openExternal } from '../lib/desktop';
+import { useDialog } from './useDialog';
 import './SettingsDialog.css';
 
-export const SETTINGS_SECTIONS = ['General', 'Personalization', 'Subscriptions', 'Tools', 'Data controls'] as const;
+export const SETTINGS_SECTIONS = ['General', 'Personalization', 'Subscriptions', 'Tools', 'Data controls', 'Keyboard shortcuts'] as const;
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
 
 interface Props {
@@ -30,6 +34,8 @@ interface Props {
   onClose: () => void;
   chatgpt: ChatGPTAccount;
   claude: ClaudeAccount;
+  gemini: SubscriptionAccount;
+  grok: SubscriptionAccount;
 }
 
 const THEME_LABELS: Record<Theme, string> = { system: 'System', dark: 'Dark', light: 'Light' };
@@ -37,17 +43,19 @@ const THEME_LABELS: Record<Theme, string> = { system: 'System', dark: 'Dark', li
 const DESCRIPTIONS: Record<SettingsSection, string> = {
   General: 'How Jarvis looks and what it calls you.',
   Personalization: 'Instructions every new chat follows, in addition to project instructions.',
-  Subscriptions: 'Add the AI plans you already pay for. Jarvis will route models through these instead of separate API billing.',
+  Subscriptions: 'Sign in to connect your accounts, then choose your plan.',
   Tools: 'MCP servers and skills every model in Jarvis can use, ChatGPT and Claude alike.',
   'Data controls': 'Everything is stored on this device only.',
+  'Keyboard shortcuts': 'Move around Jarvis without leaving the keyboard.',
 };
 
 /** Two-step destructive button: first click arms, second confirms. */
-function ConfirmButton({ label, onConfirm }: { label: string; onConfirm: () => void }) {
+function ConfirmButton({ label, onConfirm, disabled }: { label: string; onConfirm: () => void; disabled?: boolean }) {
   const [armed, setArmed] = useState(false);
   return (
     <button
       className="text-btn danger bordered"
+      disabled={disabled}
       onBlur={() => setArmed(false)}
       onClick={() => {
         if (!armed) return setArmed(true);
@@ -65,13 +73,10 @@ function SubscriptionsPanel({
   onChange,
   chatgpt,
   claude,
-}: Pick<Props, 'subscriptions' | 'onChange' | 'chatgpt' | 'claude'>) {
-  // A provider counts once it is signed in or has a plan recorded.
-  const linked = (id: string) =>
-    !!subscriptions[id] ||
-    (id === 'openai' && chatgpt.state.phase === 'connected') ||
-    (id === 'anthropic' && claude.state.phase === 'connected');
-  const count = PROVIDERS.filter((p) => linked(p.id)).length;
+  gemini,
+  grok,
+}: Pick<Props, 'subscriptions' | 'onChange' | 'chatgpt' | 'claude' | 'gemini' | 'grok'>) {
+  const count = [chatgpt, claude, gemini, grok].filter((account) => account.state.phase === 'connected').length;
   return (
     <>
       <ul className="provider-list">
@@ -79,10 +84,13 @@ function SubscriptionsPanel({
           const plan = subscriptions[p.id];
           const isChatGPT = p.id === 'openai';
           const isClaude = p.id === 'anthropic';
-          const planSelect = plan && (
+          const extraAccount = p.id === 'google' ? gemini : p.id === 'xai' ? grok : null;
+          const connected = isChatGPT ? chatgpt.state.phase === 'connected' : isClaude ? claude.state.phase === 'connected' : extraAccount?.state.phase === 'connected';
+          const planSelect = connected && (
             <label className="plan-select">
               <span className="sr-only">{p.name} plan</span>
-              <select value={plan} onChange={(e) => onChange(setPlan(subscriptions, p.id, e.target.value))}>
+              <select aria-label={`${p.name} plan`} value={plan ?? ''} onChange={(e) => onChange(setPlan(subscriptions, p.id, e.target.value))}>
+                <option value="" disabled>Choose plan</option>
                 {p.plans.map((pl) => (
                   <option key={pl} value={pl}>
                     {pl}
@@ -92,7 +100,7 @@ function SubscriptionsPanel({
             </label>
           );
           return (
-            <li key={p.id} className={`provider-row${plan ? ' added' : ''}`}>
+            <li key={p.id} data-provider={p.id} className={`provider-row${connected ? ' added' : ''}`}>
               <span className="provider-mark">
                 <SiteIcon site={p.site} size={20} fallback={p.name[0]} />
               </span>
@@ -107,7 +115,7 @@ function SubscriptionsPanel({
                   ) : isClaude ? (
                     <ClaudeStatusLine account={claude} />
                   ) : (
-                    plan && <span className="status-dot">Not connected</span>
+                    extraAccount && <SubscriptionStatusLine account={extraAccount} />
                   )}
                 </span>
               </div>
@@ -120,21 +128,16 @@ function SubscriptionsPanel({
                 <div className="provider-actions">
                   <ClaudeConnection account={claude} />
                 </div>
-              ) : plan ? (
+              ) : (
                 <div className="provider-actions">
                   {planSelect}
-                  <button className="text-btn danger" onClick={() => onChange(setPlan(subscriptions, p.id, null))}>
-                    Remove
-                  </button>
+                  {extraAccount && <SubscriptionConnection
+                    account={extraAccount}
+                    installLabel={`Set up ${p.name}`}
+                    signOutNotice={p.id === 'google' ? 'Also signs out Antigravity CLI on this Mac' : undefined}
+                    onInstall={() => openExternal(p.id === 'google' ? 'https://antigravity.google/docs/install/' : 'https://docs.x.ai/build/overview')}
+                  />}
                 </div>
-              ) : (
-                <button
-                  className="add-btn"
-                  onClick={() => onChange(setPlan(subscriptions, p.id, p.plans.find((x) => x !== 'Free') ?? p.plans[0]))}
-                >
-                  <SmallPlusIcon />
-                  Add
-                </button>
               )}
             </li>
           );
@@ -142,7 +145,7 @@ function SubscriptionsPanel({
       </ul>
       <footer className="dialog-footnote">
         <span className="mono">
-          {count} of {PROVIDERS.length} connected
+          {count} account{count === 1 ? '' : 's'} connected
         </span>
         <span>
           Jarvis never sees your passwords. Claude uses this Mac&rsquo;s Claude Code login, so it shares that plan&rsquo;s
@@ -156,27 +159,33 @@ function SubscriptionsPanel({
 export function SettingsDialog(props: Props) {
   const { preferences: prefs, onPreferencesChange: setPrefs, onClose } = props;
   const [section, setSection] = useState<SettingsSection>(props.initialSection ?? 'General');
+  const [archiveQuery, setArchiveQuery] = useState('');
   const dialogRef = useRef<HTMLDivElement>(null);
   const archived = props.chats.filter((c) => c.archived);
+  const visibleArchived = archived.filter((chat) => chat.title.toLowerCase().includes(archiveQuery.trim().toLowerCase()));
   const saved = props.chats.filter((c) => !c.temporary);
+  const modifier = isMac() ? '⌘' : 'Ctrl';
+  const shortcuts = [
+    ['New chat', `Shift + ${modifier} + O`],
+    ['Search conversations', `${modifier} + K`],
+    ['Toggle sidebar', `Shift + ${modifier} + S`],
+    ['Open settings', `${modifier} + ,`],
+    ['New browser tab', `Shift + ${modifier} + B`],
+    ['New tab in full view', `Shift + ${modifier} + F`],
+    ['Open a side chat', `${isMac() ? 'Option' : 'Alt'} + ${modifier} + S`],
+    ['Add a new line', 'Shift + Enter'],
+    ['Close a dialog or menu', 'Esc'],
+  ];
 
-  // Settings edits re-render the parent with a new onClose; read it through a ref so focus isn't reset each keystroke.
-  const closeRef = useRef(onClose);
-  closeRef.current = onClose;
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && closeRef.current();
-    document.addEventListener('keydown', onKey);
-    dialogRef.current?.focus();
-    return () => document.removeEventListener('keydown', onKey);
-  }, []);
+  useDialog(dialogRef, onClose);
 
   return (
     <div className="dialog-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title" tabIndex={-1} ref={dialogRef}>
-        <nav className="dialog-nav">
+        <nav className="dialog-nav" aria-label="Settings sections">
           <h2 id="settings-title">Settings</h2>
           {SETTINGS_SECTIONS.map((s) => (
-            <button key={s} className={`dialog-nav-item${s === section ? ' active' : ''}`} onClick={() => setSection(s)}>
+            <button key={s} className={`dialog-nav-item${s === section ? ' active' : ''}`} aria-current={s === section ? 'page' : undefined} onClick={() => setSection(s)}>
               {s}
             </button>
           ))}
@@ -188,28 +197,42 @@ export function SettingsDialog(props: Props) {
               <h3>{section}</h3>
               <p>{DESCRIPTIONS[section]}</p>
             </div>
-            <button className="icon-btn" title="Close" onClick={onClose}>
+            <button className="icon-btn" title="Close settings" aria-label="Close settings" onClick={onClose}>
               <CloseIcon />
             </button>
           </header>
 
           {section === 'General' && (
             <div className="settings-rows">
-              <label className="settings-row">
+              <div className="settings-row">
                 <span>Theme</span>
-                <span className="segmented" role="radiogroup">
+                <span className="segmented" role="radiogroup" aria-label="Theme">
                   {THEMES.map((t) => (
                     <button
                       key={t}
                       role="radio"
                       aria-checked={prefs.theme === t}
+                      tabIndex={prefs.theme === t ? 0 : -1}
                       className={prefs.theme === t ? 'on' : ''}
                       onClick={() => setPrefs({ ...prefs, theme: t })}
+                      onKeyDown={(event) => {
+                        const direction = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0;
+                        if (!direction) return;
+                        event.preventDefault();
+                        const next = (THEMES.indexOf(t) + direction + THEMES.length) % THEMES.length;
+                        setPrefs({ ...prefs, theme: THEMES[next] });
+                        (event.currentTarget.parentElement?.children[next] as HTMLElement)?.focus();
+                      }}
                     >
                       {THEME_LABELS[t]}
                     </button>
                   ))}
                 </span>
+              </div>
+              <label className="settings-row">
+                <span>Desktop task notifications</span>
+                <input type="checkbox" aria-label="Desktop task notifications" checked={prefs.desktopTaskNotifications}
+                  onChange={(event) => setPrefs({ ...prefs, desktopTaskNotifications: event.target.checked })} />
               </label>
               <label className="settings-row">
                 <span>What should Jarvis call you?</span>
@@ -241,7 +264,7 @@ export function SettingsDialog(props: Props) {
             </div>
           )}
 
-          {section === 'Subscriptions' && <SubscriptionsPanel subscriptions={props.subscriptions} onChange={props.onChange} chatgpt={props.chatgpt} claude={props.claude} />}
+          {section === 'Subscriptions' && <SubscriptionsPanel subscriptions={props.subscriptions} onChange={props.onChange} chatgpt={props.chatgpt} claude={props.claude} gemini={props.gemini} grok={props.grok} />}
 
           {section === 'Tools' && <ToolsPanel />}
 
@@ -255,19 +278,21 @@ export function SettingsDialog(props: Props) {
               </div>
               <div className="settings-row">
                 <span>Archive all chats</span>
-                <ConfirmButton label="Archive all" onConfirm={props.onArchiveAll} />
+                <ConfirmButton label="Archive all" onConfirm={props.onArchiveAll} disabled={!saved.some((chat) => !chat.archived)} />
               </div>
               <div className="settings-row">
                 <span>Delete all chats</span>
-                <ConfirmButton label="Delete all" onConfirm={props.onDeleteAll} />
+                <ConfirmButton label="Delete all" onConfirm={props.onDeleteAll} disabled={saved.length === 0} />
               </div>
               <div className="settings-stack">
                 <span>Archived chats ({archived.length})</span>
                 {archived.length === 0 ? (
-                  <span className="settings-hint">Archived chats leave the sidebar but stay searchable here.</span>
+                  <span className="settings-hint">Archived conversations stay saved and appear in search.</span>
                 ) : (
+                  <>
+                  <input className="settings-input archive-search" aria-label="Search archived conversations" placeholder="Find an archived conversation" value={archiveQuery} onChange={(event) => setArchiveQuery(event.target.value)} />
                   <ul className="archived-list">
-                    {archived.map((c) => (
+                    {visibleArchived.map((c) => (
                       <li key={c.id}>
                         <span className="history-title">{c.title}</span>
                         <button className="text-btn" onClick={() => props.onUnarchive(c.id)}>
@@ -276,9 +301,18 @@ export function SettingsDialog(props: Props) {
                       </li>
                     ))}
                   </ul>
+                  {visibleArchived.length === 0 && <span className="settings-hint">No archived conversations match.</span>}
+                  </>
                 )}
               </div>
             </div>
+          )}
+          {section === 'Keyboard shortcuts' && (
+            <dl className="shortcut-list">
+              {shortcuts.map(([label, shortcut]) => (
+                <div key={label}><dt>{label}</dt><dd><kbd>{shortcut}</kbd></dd></div>
+              ))}
+            </dl>
           )}
         </section>
       </div>

@@ -8,3 +8,6 @@ temporary screenshots/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+.ralph/
+PROMPT.md
+.runtime/providers/

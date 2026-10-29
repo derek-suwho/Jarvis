@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Message } from '../src/lib/chats';
+import { buildReplyHistory, composeInstructions } from '../src/lib/replyContext';
 import {
   canGoBack,
   canGoForward,
@@ -80,5 +81,21 @@ describe('side chat', () => {
     const tabs = updateSideChat([a, b], a.id, (s) => ({ ...s, messages: [msg('x', 'hi')] }));
     expect(tabs[0].kind === 'sidechat' && tabs[0].sidechat.messages).toHaveLength(1);
     expect(tabs[1]).toBe(b);
+  });
+
+  it('keeps source project instructions with side-chat context after project changes', () => {
+    const project = { instructions: 'Use Alpha project sources only.' };
+    const tab = createSideChat({ title: 'Alpha', messages: [msg('1', 'Alpha context')] }, project.instructions);
+    project.instructions = 'Use Beta project sources only.';
+    if (tab.kind !== 'sidechat') throw new Error('expected sidechat');
+
+    const history = buildReplyHistory(
+      [...tab.sidechat.context, msg('2', 'A follow-up')],
+      composeInstructions('Be concise.', tab.sidechat.projectInstructions),
+    );
+    expect(history[0].content).toContain('Use Alpha project sources only.');
+    expect(history[0].content).toContain('Alpha context');
+    expect(history[0].content).not.toContain('Beta');
+    expect(history[1]).toEqual({ role: 'user', content: 'A follow-up' });
   });
 });
