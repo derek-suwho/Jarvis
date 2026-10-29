@@ -55,8 +55,12 @@ The public types live in `desktop/importers/types.ts`:
 - `status`: `ready`, `rejected`, or `cancelled`. `ready` means an accepted preview
   exists, not that anything was persisted.
 - `schemaVersion: 1` identifies this importer contract, not a vendor schema.
-- `provider`, `format`: validated `chatgpt`/`chatgpt-mapping` or
-  `claude`/`claude-chat-messages`. Mixed/ambiguous providers reject the entire input.
+- `provider`, `format`: `chatgpt`/`chatgpt-mapping` or `claude`/`claude-chat-messages`.
+  Detection prefers successfully validated providers across the entire batch;
+  malformed foreign-shaped neighbors become record-level rejections. If no record
+  validates, core shapes select the adapter for precise errors. Multiple validated
+  providers, or multiple fallback shapes, reject as ambiguous. An explicit provider
+  only checks consistency with detection; it cannot force a provider.
 - `exportVersion: null`: neither tested shape supplies a reliable vendor version.
 - `importId`: SHA-256 of exact input bytes, or null when rejected before hashing.
 - `conversations`: canonical IDs, content revisions, titles, normalized timestamps,

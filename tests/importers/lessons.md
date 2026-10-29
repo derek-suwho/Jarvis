@@ -11,6 +11,9 @@
   metadata-only contract.
 - Identify providers by core discriminators or validated candidates; unrelated
   extension fields must not create ambiguity. Reject genuinely valid hybrids.
+- Separate validated provider evidence from shape-only candidates across the
+  entire batch. Use shape fallback only when no record validates; test foreign
+  malformed neighbors in both orders and with explicit provider options.
 - Validate optional metadata containers before inspecting omissions. Malformed
   metadata must not silently become a complete transcript.
 - Emit visible user/assistant dialogue only; omitted system/tool content must

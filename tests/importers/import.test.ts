@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import * as importer from '../../desktop/importers/index';
-import type { ImportOptions } from '../../desktop/importers/types';
+import type { ImportOptions, Provider } from '../../desktop/importers/types';
 
 const fixture = () => JSON.parse(readFileSync(new URL('../fixtures/importers/chatgpt.json', import.meta.url), 'utf8'));
 const claude = () => [{
@@ -15,6 +15,18 @@ const run = (input: string | Uint8Array, options?: ImportOptions) => {
   return importer.importProviderHistory(input, options);
 };
 const preview = (value: unknown, options?: ImportOptions) => run(JSON.stringify(value), options);
+const providerRecord = (provider: Provider) => provider === 'chatgpt' ? fixture()[0] : claude()[0];
+const malformedRecord = (provider: Provider) => {
+  const record = providerRecord(provider);
+  if (provider === 'chatgpt') {
+    record.id = record.conversation_id = 'malformed-chatgpt';
+    record.mapping['answer-node'].message.author.role = 'invalid';
+  } else {
+    record.uuid = 'malformed-claude';
+    record.chat_messages[0].sender = 'invalid';
+  }
+  return record;
+};
 
 describe('provider-neutral import preview', () => {
   it('detects both providers and preserves canonical content/provenance', async () => {
@@ -173,6 +185,93 @@ describe('provider-neutral import preview', () => {
     expect(await preview(values)).toMatchObject({
       status: 'rejected', provider: 'chatgpt', conversations: [],
       rejections: [{ code: 'INVALID_ROLE', recordIndex: 0 }],
+    });
+  });
+
+  describe('batch provider evidence', () => {
+    const providers = ['chatgpt', 'claude'] as const;
+    const neighborCases = providers.flatMap(provider =>
+      ['foreign', 'same'].flatMap(neighbor =>
+        [false, true].flatMap(malformedFirst =>
+          [false, true].map(explicit => ({ provider, neighbor, malformedFirst, explicit })),
+        ),
+      ),
+    );
+
+    it.each(neighborCases)(
+      'accepts $provider with malformed $neighbor neighbor; malformedFirst=$malformedFirst explicit=$explicit',
+      async ({ provider, neighbor, malformedFirst, explicit }) => {
+        const valid = providerRecord(provider);
+        const other = provider === 'chatgpt' ? 'claude' : 'chatgpt';
+        const malformed = malformedRecord(neighbor === 'same' ? provider : other);
+        const values = malformedFirst ? [malformed, valid] : [valid, malformed];
+        const expected = await preview([valid]);
+        const result = await preview(values, explicit ? { provider } : undefined);
+        expect(result).toMatchObject({
+          status: 'ready', provider,
+          counts: { conversations: 1, rejectedRecords: 1 },
+          rejections: [{ code: neighbor === 'same' ? 'INVALID_ROLE' : 'INVALID_RECORD', recordIndex: malformedFirst ? 0 : 1 }],
+        });
+        expect(result.conversations).toEqual(expected.conversations);
+      },
+    );
+
+    it.each(providers)('does not let explicit provider override validated $0 evidence', async provider => {
+      const other = provider === 'chatgpt' ? 'claude' : 'chatgpt';
+      expect(await preview([providerRecord(provider), malformedRecord(other)], { provider: other })).toMatchObject({
+        status: 'rejected', conversations: [], rejections: [{ code: 'PROVIDER_MISMATCH' }],
+      });
+    });
+
+    it.each(providers)('prefers validated %s evidence over a malformed dual-shaped neighbor', async provider => {
+      const malformed = { ...malformedRecord('chatgpt'), ...malformedRecord('claude') };
+      const valid = providerRecord(provider);
+      const expected = await preview([valid]);
+      for (const malformedFirst of [false, true]) {
+        for (const options of [undefined, { provider }]) {
+          const records = malformedFirst ? [malformed, valid] : [valid, malformed];
+          const result = await preview(records, options);
+          expect(result).toMatchObject({
+            status: 'ready', provider, counts: { conversations: 1, rejectedRecords: 1 },
+            rejections: [{ code: 'INVALID_ROLE', recordIndex: malformedFirst ? 0 : 1 }],
+          });
+          expect(result.conversations).toEqual(expected.conversations);
+        }
+      }
+    });
+
+    it.each([undefined, ...providers])('rejects absent provider evidence even with option %s', async provider => {
+      expect(await preview([{ mapping: {}, chat_messages: [] }], { provider })).toMatchObject({
+        status: 'rejected', provider: null, conversations: [], rejections: [{ code: 'UNSUPPORTED_FORMAT' }],
+      });
+    });
+
+    it.each([undefined, ...providers])('rejects two validated providers with option %s, independent of order', async provider => {
+      const values = providers.map(providerRecord);
+      for (const records of [values, [...values].reverse()]) {
+        expect(await preview(records, { provider })).toMatchObject({
+          status: 'rejected', conversations: [], rejections: [{ code: 'AMBIGUOUS_PROVIDER' }],
+        });
+      }
+    });
+
+    it.each(providers)('falls back to precise %s adapter errors when no record validates', async provider => {
+      for (const options of [undefined, { provider }]) {
+        expect(await preview([malformedRecord(provider)], options)).toMatchObject({
+          status: 'rejected', provider, conversations: [], counts: { rejectedRecords: 1 },
+          rejections: [{ code: 'INVALID_ROLE', recordIndex: 0 }],
+        });
+      }
+    });
+
+    it.each([undefined, ...providers])('rejects wholly malformed dual-provider shapes with option %s', async provider => {
+      const chatgpt = malformedRecord('chatgpt');
+      const claude = malformedRecord('claude');
+      for (const records of [[chatgpt, claude], [claude, chatgpt], [{ ...chatgpt, ...claude }]]) {
+        expect(await preview(records, { provider })).toMatchObject({
+          status: 'rejected', conversations: [], rejections: [{ code: 'AMBIGUOUS_PROVIDER' }],
+        });
+      }
     });
   });
 

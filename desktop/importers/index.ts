@@ -123,20 +123,18 @@ function checkCancellation(signal?: AbortSignal): void {
   if (signal?.aborted) throw new RecordError('CANCELLED');
 }
 
-function providerCandidates(record: unknown, limits: ImportLimits): Provider[] {
-  if (!object(record)) return [];
-  const candidates: Provider[] = [];
+function providerCandidates(record: unknown, limits: ImportLimits): { shapes: Provider[]; validated: Provider[] } {
+  if (!object(record)) return { shapes: [], validated: [] };
+  const shapes: Provider[] = [];
   if (object(record.mapping) && typeof record.title === 'string' && Object.hasOwn(record, 'current_node')) {
-    candidates.push('chatgpt');
+    shapes.push('chatgpt');
   }
   if (Array.isArray(record.chat_messages) && typeof record.name === 'string' && Object.hasOwn(record, 'uuid')) {
-    candidates.push('claude');
+    shapes.push('claude');
   }
-  if (candidates.length < 2) return candidates;
 
-  // Overlapping core fields may be unrelated extensions. Only two successful
-  // adapters establish ambiguity; a failed candidate cannot veto a valid one.
-  const validated = candidates.filter(provider => {
+  // Validate every candidate; a malformed foreign record is not provider evidence.
+  const validated = shapes.filter(provider => {
     try {
       (provider === 'chatgpt' ? parseChatGPT : parseClaude)(record, limits);
       return true;
@@ -145,9 +143,7 @@ function providerCandidates(record: unknown, limits: ImportLimits): Provider[] {
       return false;
     }
   });
-  // Retain malformed core shapes so the selected adapter can report precise
-  // validation errors and reject aliases shared with an otherwise valid twin.
-  return validated.length ? validated : candidates;
+  return { shapes, validated };
 }
 
 /** Pure preview only. Consumers must render as untrusted text and persist transactionally. */
@@ -179,15 +175,20 @@ export async function importProviderHistory(input: string | Uint8Array, options:
       if (document.length > limits.maxConversations - records.length) throw new RecordError('LIMIT_EXCEEDED');
       for (const record of document) records.push(record);
     }
-    const providers = new Set<Provider>();
+    const shapeProviders = new Set<Provider>();
+    const validatedProviders = new Set<Provider>();
     for (const record of records) {
       await yieldTurn();
       checkCancellation(options.signal);
-      for (const candidate of providerCandidates(record, limits)) {
-        providers.add(candidate);
-      }
-      if (providers.size > 1) throw new RecordError('AMBIGUOUS_PROVIDER');
+      const candidates = providerCandidates(record, limits);
+      for (const provider of candidates.shapes) shapeProviders.add(provider);
+      for (const provider of candidates.validated) validatedProviders.add(provider);
+      if (validatedProviders.size > 1) throw new RecordError('AMBIGUOUS_PROVIDER');
     }
+    // Only wholly malformed batches use shape evidence, preserving adapter errors
+    // without letting a malformed neighbor veto a successfully validated provider.
+    const providers = validatedProviders.size ? validatedProviders : shapeProviders;
+    if (providers.size > 1) throw new RecordError('AMBIGUOUS_PROVIDER');
     const provider = providers.values().next().value;
     if (!provider) throw new RecordError('UNSUPPORTED_FORMAT');
     if (options.provider !== undefined && options.provider !== provider) throw new RecordError('PROVIDER_MISMATCH');
