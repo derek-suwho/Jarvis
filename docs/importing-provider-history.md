@@ -1,11 +1,33 @@
-# Provider history import
+# Onboarding imports: conversation history and agent setup
 
 Issue #1 supplies a pure, in-memory preview library. SQLite persistence, file
 pickers, Electron IPC, the renderer, and shared contracts belong to the subsequent
 integration PR. No dependencies were added. Use Node 22.2+ (or Node 20.15+); ZIP
 checks use the standard library's [CRC32 support](https://nodejs.org/api/zlib.html#zlibcrc32data-value).
 
-## API
+## Final product scope
+
+The [final issue decision](https://github.com/derek-suwho/Jarvis/issues/1#issuecomment-6508817026)
+supersedes earlier download-watching/no-picker proposals. This is a selective
+onboarding migration, not a recreation or continuous synchronization of provider
+memory systems.
+
+- **Consumer history:** the user selects an official ChatGPT or Claude JSON/ZIP
+  export. No email/mailbox access, browser scraping, automatic cloud sync, or
+  Downloads-folder watching is part of this feature.
+- **Local agent setup:** separately select instructions, skills/plugins, MCP
+  configuration, project metadata, and supported project memories from available
+  Claude Code/Cowork/Codex state. This PR delivers metadata-only contracts and
+  selection planning; discovery, source-file adapters, and payload transfer remain
+  unimplemented. A source name in the contract is not a claim of tested local paths.
+- **Safety:** credentials/tokens never migrate. Hooks remain disabled. Plugins
+  and MCP servers require separate explicit user review before activation.
+- **Jarvis memory:** starts mostly fresh and grows from activity inside Jarvis.
+  Imported historical conversations remain history/search context and never
+  automatically feed durable-memory extraction. Selected project-memory assets
+  remain project references; they do not automatically seed global memory either.
+
+## Consumer history API
 
 ```ts
 import { importProviderHistory } from '../desktop/importers';
@@ -24,6 +46,10 @@ HTML, scripts, tools, URLs, or instructions.
 
 The public types live in `desktop/importers/types.ts`:
 
+- `mode: 'consumer-history'` distinguishes history from setup selection plans.
+- `memoryPolicy: 'exclude-from-automatic-memory'` is required on every result
+  (including rejection/cancellation) and each accepted conversation. There is no
+  import option or provider metadata that opts into automatic memory extraction.
 - `status`: `ready`, `rejected`, or `cancelled`. `ready` means an accepted preview
   exists, not that anything was persisted.
 - `schemaVersion: 1` identifies this importer contract, not a vendor schema.
@@ -126,12 +152,72 @@ The integration owner must:
 5. Render every title/text part as untrusted text. Do not feed imported `system`
    or `tool` roles directly into live agent messages, invoke tools, execute HTML,
    or automatically open URLs. `UNSAFE_URL` is advisory, not a URL sanitizer.
+6. Preserve the conversation's memory policy through persistence and search.
+   Imported-message insertions must not enqueue the durable-memory extractor.
+   Re-imports, branch updates, and retrieved historical context do not count as
+   new activity originating inside Jarvis. Enforce this at the integration boundary;
+   the importer cannot enforce a queue policy in shared code it does not own.
 
 Updated history with missing/changed source IDs cannot be matched reliably and
 is not guessed. Account/auth/cookie/token fields, arbitrary metadata, raw source
 JSON, and navigable URL objects are never included. Text that itself mentions a
 secret or an instruction remains user transcript text; this is not a secret
 redaction service.
+
+## Agent setup selection contracts
+
+`desktop/importers/setup-types.ts` defines `SetupAssetDescriptor`, `SetupSelection`,
+and `SetupSelectionPlan`; `createSetupImportPlan` validates metadata and produces
+an inert plan. It performs no local discovery, content parsing, payload import,
+installation, execution, activation, credential access, or memory writes.
+
+Future adapters must provide a descriptor containing **only**:
+
+| Field | Meaning |
+| --- | --- |
+| `source` | `claude-code`, `claude-cowork`, or `codex` |
+| `sourceId` | Stable bounded opaque asset identifier; never a filesystem path |
+| `category` | `instructions`, `skill`, `plugin`, `mcp-server`, `project`, `project-memory`, or `hook` |
+| `scope` | `{ kind: 'user' }` or `{ kind: 'project', projectId }`; projects/memories require project scope |
+| `contentDigest` | Lowercase SHA-256 of the adapter's credential-free normalized asset |
+
+```ts
+import { createSetupImportPlan } from '../desktop/importers';
+
+const preview = createSetupImportPlan(descriptors);
+// The integration UI records the user's actual selected items and revisions.
+const plan = createSetupImportPlan(descriptors, selectedReferences);
+```
+
+`selectedReferences` contains `{ id, revision }` pairs from a prior plan. Omitting
+it selects nothing. Unknown, duplicate, stale, or malformed selections reject the
+entire plan. Selection cannot express approval/enablement. Conflicting descriptors
+reject; identical repeats collapse. Asset IDs are namespaced by source, category,
+scope, and source ID. Content changes preserve identity and change revision.
+Future review/activation must bind its separate approval to that current revision.
+
+Every output item has `enabled: false`. Hooks have `activation: 'disabled'`;
+plugins/MCP have `activation: 'requires-explicit-review'`; other assets remain
+`not-activated`. Project memories additionally carry `memoryUse:
+'project-reference-only'`. The plan's memory policy excludes automatic extraction.
+These are integration requirements, not an implemented installer or authorization
+service; selection alone must never be used to start an executable component.
+
+The contract carries no raw settings, text, labels, paths, URLs, command arguments,
+environment, headers, or credential payloads. Unknown fields—including `enabled`
+or `reviewed`—reject instead of passing through. Source/project identifiers become
+hashed references in the output. Descriptors and selections are limited to 1,000
+each; source/project identifiers use the same 256-character rules as history IDs.
+All diagnostics are fixed messages. Plans are detached from caller objects.
+
+This metadata-only boundary is **not a credential sanitizer** and cannot verify
+the content behind a supplied digest. Source adapters must separately validate
+approved roots, reject credential files/fields, sanitize supported assets, and
+verify the digest at transfer/review time. No actual Claude Code/Cowork/Codex setup
+files have been parsed by this PR; the setup fixture is a synthetic descriptor
+contract, not a vendor export. Exact Cowork paths and supported project-memory
+formats require later validation on a real Mac. Hooks/configuration do not become
+safe merely because the user selected their descriptors.
 
 ## Archive and resource policy
 
@@ -172,13 +258,23 @@ keys also reject. Limits apply across all conversation shards. These conservativ
 ceilings intentionally reject some large legitimate exports; do not bypass them
 without a reviewed streaming/worker design.
 
-## Deferred artifacts
+## Consumer export omissions and deferred integration
 
 Uploaded/generated files and images, audio/video, HTML history views, projects,
 memories, account/profile data, browser state, search/browsing artifacts, citation
 targets, thinking/reasoning blocks, executable tool payloads, alternate ChatGPT
 branches, encrypted/ZIP64/nested archives, undocumented wrappers, and missing-ID
 records are deferred. No attachment completeness is inferred from a filename.
+This list describes consumer exports; selective local project metadata/memory is
+a separate setup category, represented only by the contracts above in this PR.
+
+User-approved local-root discovery, provider-specific setup adapters, credential
+exclusion at the payload boundary, payload transfer, explicit plugin/MCP review,
+and installation/activation are later integration work. Local agent transcripts
+are not implemented as a third history source. File selection/permissions, SQLite,
+IPC, renderer flows, and durable-memory queue enforcement remain integration-owned.
+Email access, scraping, Downloads watching, and automatic cloud synchronization
+are out of the final product scope, not implied follow-up features.
 
 ## Verification
 
@@ -193,3 +289,6 @@ Tests use synthetic JSON and generated ZIPs. Cross-layer checks compare ZIP/JSON
 canonical results, repeated imports, updated exports, shards, invalid ignored
 artifacts, and cancellation with no partial results. A graph regression exercises
 the 100,000-node ceiling to catch quadratic sibling validation.
+Additional test-first cases cover non-overridable history memory policy, setup
+selection by revision, disabled hooks, plugin/MCP review requirements, rejected
+credential/executable fields, scoped identities, and inert project-memory references.

@@ -2,6 +2,8 @@
 export type Provider = 'chatgpt' | 'claude';
 export type Quality = 'structured' | 'partial';
 export type ImportRole = 'user' | 'assistant' | 'system' | 'tool';
+/** Historical transcripts are history/search context, never automatic memory evidence. */
+export type HistoryMemoryPolicy = 'exclude-from-automatic-memory';
 
 export interface ImportLimits {
   maxInputBytes: number;
@@ -39,11 +41,14 @@ export interface ImportedConversation {
   createdAt: string | null;
   updatedAt: string | null;
   quality: Quality;
+  memoryPolicy: HistoryMemoryPolicy;
   messages: ImportedMessage[];
   provenance: { provider: Provider; conversationId: string };
 }
 
 export interface ImportResult {
+  mode: 'consumer-history';
+  memoryPolicy: HistoryMemoryPolicy;
   status: 'ready' | 'rejected' | 'cancelled';
   schemaVersion: 1;
   importId: string | null;

@@ -8,6 +8,8 @@ import { RecordError, sourceId } from './validation';
 import type { ParsedConversation } from './adapter-types';
 import type { Diagnostic, ImportedConversation, ImportLimits, ImportOptions, ImportResult, Provider } from './types';
 export type * from './types';
+export { createSetupImportPlan } from './setup';
+export type * from './setup-types';
 
 export const DEFAULT_LIMITS: Readonly<ImportLimits> = Object.freeze({
   maxInputBytes: 32 * 1024 * 1024,
@@ -76,6 +78,7 @@ function diagnostic(code: string, recordIndex?: number): Diagnostic {
 
 function emptyResult(): ImportResult {
   return {
+    mode: 'consumer-history', memoryPolicy: 'exclude-from-automatic-memory',
     status: 'rejected', schemaVersion: 1, importId: null, provider: null, format: null, exportVersion: null,
     conversations: [], counts: { conversations: 0, messages: 0, skippedArtifacts: 0, rejectedRecords: 0 },
     warnings: [], rejections: [],
@@ -109,6 +112,7 @@ function canonical(provider: Provider, parsed: ParsedConversation): ImportedConv
   });
   const normalized = {
     id, title: parsed.title, createdAt: parsed.createdAt, updatedAt: parsed.updatedAt,
+    memoryPolicy: 'exclude-from-automatic-memory' as const,
     quality: parsed.quality, messages: canonicalMessages,
     provenance: { provider, conversationId: parsed.sourceId },
   };
