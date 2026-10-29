@@ -2,8 +2,7 @@ import { useRef, useState } from 'react';
 import type { Chat } from '../lib/chats';
 import type { Preferences, Theme } from '../lib/preferences';
 import { THEMES } from '../lib/preferences';
-import type { Subscriptions } from '../lib/subscriptions';
-import { PROVIDERS, setPlan } from '../lib/subscriptions';
+import { PROVIDERS } from '../lib/subscriptions';
 import type { ChatGPTAccount } from '../lib/useChatGPT';
 import type { ClaudeAccount } from '../lib/useClaude';
 import type { SubscriptionAccount } from '../lib/useSubscriptionAccount';
@@ -21,8 +20,6 @@ export const SETTINGS_SECTIONS = ['General', 'Personalization', 'Subscriptions',
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
 
 interface Props {
-  subscriptions: Subscriptions;
-  onChange: (s: Subscriptions) => void;
   preferences: Preferences;
   onPreferencesChange: (p: Preferences) => void;
   chats: Chat[];
@@ -43,7 +40,7 @@ const THEME_LABELS: Record<Theme, string> = { system: 'System', dark: 'Dark', li
 const DESCRIPTIONS: Record<SettingsSection, string> = {
   General: 'How Jarvis looks and what it calls you.',
   Personalization: 'Instructions every new chat follows, in addition to project instructions.',
-  Subscriptions: 'Sign in to connect your accounts, then choose your plan.',
+  Subscriptions: 'View your connected accounts and subscription plans.',
   Tools: 'MCP servers and skills every model in Jarvis can use, ChatGPT and Claude alike.',
   'Data controls': 'Everything is stored on this device only.',
   'Keyboard shortcuts': 'Move around Jarvis without leaving the keyboard.',
@@ -69,36 +66,20 @@ function ConfirmButton({ label, onConfirm, disabled }: { label: string; onConfir
 }
 
 function SubscriptionsPanel({
-  subscriptions,
-  onChange,
   chatgpt,
   claude,
   gemini,
   grok,
-}: Pick<Props, 'subscriptions' | 'onChange' | 'chatgpt' | 'claude' | 'gemini' | 'grok'>) {
+}: Pick<Props, 'chatgpt' | 'claude' | 'gemini' | 'grok'>) {
   const count = [chatgpt, claude, gemini, grok].filter((account) => account.state.phase === 'connected').length;
   return (
     <>
       <ul className="provider-list">
         {PROVIDERS.map((p) => {
-          const plan = subscriptions[p.id];
           const isChatGPT = p.id === 'openai';
           const isClaude = p.id === 'anthropic';
           const extraAccount = p.id === 'google' ? gemini : p.id === 'xai' ? grok : null;
           const connected = isChatGPT ? chatgpt.state.phase === 'connected' : isClaude ? claude.state.phase === 'connected' : extraAccount?.state.phase === 'connected';
-          const planSelect = connected && (
-            <label className="plan-select">
-              <span className="sr-only">{p.name} plan</span>
-              <select aria-label={`${p.name} plan`} value={plan ?? ''} onChange={(e) => onChange(setPlan(subscriptions, p.id, e.target.value))}>
-                <option value="" disabled>Choose plan</option>
-                {p.plans.map((pl) => (
-                  <option key={pl} value={pl}>
-                    {pl}
-                  </option>
-                ))}
-              </select>
-            </label>
-          );
           return (
             <li key={p.id} data-provider={p.id} className={`provider-row${connected ? ' added' : ''}`}>
               <span className="provider-mark">
@@ -121,7 +102,6 @@ function SubscriptionsPanel({
               </div>
               {isChatGPT ? (
                 <div className="provider-actions">
-                  {planSelect}
                   <ChatGPTConnection account={chatgpt} />
                 </div>
               ) : isClaude ? (
@@ -130,7 +110,6 @@ function SubscriptionsPanel({
                 </div>
               ) : (
                 <div className="provider-actions">
-                  {planSelect}
                   {extraAccount && <SubscriptionConnection
                     account={extraAccount}
                     installLabel={`Set up ${p.name}`}
@@ -264,7 +243,7 @@ export function SettingsDialog(props: Props) {
             </div>
           )}
 
-          {section === 'Subscriptions' && <SubscriptionsPanel subscriptions={props.subscriptions} onChange={props.onChange} chatgpt={props.chatgpt} claude={props.claude} gemini={props.gemini} grok={props.grok} />}
+          {section === 'Subscriptions' && <SubscriptionsPanel chatgpt={props.chatgpt} claude={props.claude} gemini={props.gemini} grok={props.grok} />}
 
           {section === 'Tools' && <ToolsPanel />}
 

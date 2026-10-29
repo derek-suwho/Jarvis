@@ -293,21 +293,21 @@ try {
     assert.equal(await page.$(`${row} select`), null, 'A stored plan cannot bypass sign-in');
     await clickText(`${row} button`, 'Sign in');
     await page.waitForFunction((selector) => document.querySelector(selector)?.textContent.includes('Finish signing in'), {}, row);
-    assert.equal(await page.$(`${row} select`), null, 'Launching sign-in cannot unlock plan selection');
+    assert.equal(await page.$(`${row} select`), null, 'Plans remain read-only during sign-in');
     await screenshot(`${key}-waiting-for-signin`);
-    await page.evaluate((provider) => {
+    await page.evaluate(({ provider, plan }) => {
       window.providerFixture[provider].connected = true;
+      window.providerFixture[provider].plan = plan;
       window.dispatchEvent(new Event('focus'));
-    }, key);
-    await page.waitForSelector(`${row} select`);
-    await page.select(`${row} select`, plan);
-    assert.equal(await page.evaluate((provider) => JSON.parse(localStorage.getItem('jarvis.subscriptions'))[provider], id), plan);
+    }, { provider: key, plan });
+    await page.waitForFunction((selector, label) => document.querySelector(selector)?.textContent.includes(label), {}, row, plan);
+    assert.equal(await page.$(`${row} select`), null, 'Connected plans are account metadata, not editable choices');
     await screenshot(`${key}-verified-plan`);
     await clickText(`${row} button`, 'Sign out');
     if (key === 'gemini') await clickText(`${row} button`, 'Confirm sign out');
-    await page.waitForSelector(`${row} select`, { hidden: true });
+    await page.waitForFunction((selector) => document.querySelector(selector)?.textContent.includes('Not connected'), {}, row);
   }
-  console.log('PASS Gemini and Grok plans unlock only after verified status, then relock on sign-out');
+  console.log('PASS Gemini and Grok plans display only after verified status and disappear on sign-out');
   assert.deepEqual(errors, [], 'No runtime errors');
 } finally {
   await browser.close();

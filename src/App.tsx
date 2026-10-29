@@ -48,8 +48,7 @@ import { greeting, loadPreferences, savePreferences } from './lib/preferences';
 import { resolveProfileName } from './lib/profile';
 import type { Project } from './lib/projects';
 import { createProject, loadProjects, saveProjects, updateProject } from './lib/projects';
-import type { Subscriptions } from './lib/subscriptions';
-import { PROVIDERS, loadSubscriptions, saveSubscriptions } from './lib/subscriptions';
+import { PROVIDERS } from './lib/subscriptions';
 import type { BrowserState, Tab } from './lib/tabs';
 import { createBrowserTab, createSideChat, updateSideChat } from './lib/tabs';
 import { useChatGPT } from './lib/useChatGPT';
@@ -118,7 +117,6 @@ export function App() {
   const [notice, setNotice] = useState<{ text: string; undo?: () => void } | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [settings, setSettings] = useState<SettingsSection | null>(null);
-  const [subscriptions, setSubscriptions] = useState<Subscriptions>(loadSubscriptions);
   const chatgpt = useChatGPT();
   const claude = useClaude();
   const gemini = useSubscriptionAccount('gemini');
@@ -195,7 +193,6 @@ export function App() {
   useEffect(() => saveProjects(projects), [projects]);
   useEffect(() => saveSchedules(schedules), [schedules]);
   useEffect(() => savePreferences(prefs), [prefs]);
-  useEffect(() => saveSubscriptions(subscriptions), [subscriptions]);
   useResolvedTheme(prefs.theme);
   useEffect(() => {
     document.documentElement.classList.toggle('desktop-mac', isDesktop() && isMac());
@@ -965,8 +962,6 @@ export function App() {
       {settings && (
         <SettingsDialog
           initialSection={settings}
-          subscriptions={subscriptions}
-          onChange={setSubscriptions}
           preferences={prefs}
           onPreferencesChange={setPrefs}
           chats={chats}

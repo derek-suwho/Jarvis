@@ -219,20 +219,6 @@
   box-shadow: none;
 }
 
-.plan-select select {
-  height: 32px;
-  padding: 0 10px;
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  background: var(--input-bg);
-  cursor: pointer;
-  outline: none;
-}
-
-.plan-select select:focus-visible {
-  box-shadow: var(--ring);
-}
-
 .add-btn,
 .text-btn {
   display: inline-flex;

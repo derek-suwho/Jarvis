@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Account plan fixture</title></head>
+<body>
+  <div id="root"></div>
+  <script type="module">
+    // Synthetic account bridge only; never connects to real accounts.
+    const query = new URLSearchParams(location.search);
+    localStorage.setItem('jarvis.preferences', JSON.stringify({ name: 'Alex Example', theme: query.get('theme') || 'dark', instructions: '' }));
+    localStorage.setItem('jarvis.subscriptions', JSON.stringify({ openai: 'Business', google: 'AI Ultra' }));
+    window.accountPlanFixture = {
+      chatgpt: { connected: true, registered: true, email: 'alex@example.invalid', plan: query.has('unknown') ? null : 'plus' },
+      claude: { connected: true, installed: true, email: 'alex@example.invalid', plan: 'pro' },
+      gemini: { connected: true, installed: true, name: null, email: 'alex@example.invalid', plan: 'AI Pro' },
+      grok: { connected: false, installed: true, name: null, email: null, plan: null },
+    };
+    const account = key => ({
+      status: async () => ({ ...window.accountPlanFixture[key] }),
+      signIn: async () => ({ ok: true }), cancel: async () => {},
+      signOut: async () => { window.accountPlanFixture[key].connected = false; return { ok: true, revoked: true }; },
+    });
+    window.jarvis = {
+      isDesktop: true, platform: 'darwin', setTheme: () => {}, onCommand: () => () => {},
+      openExternal: async url => { window.lastOpenedUrl = url; },
+      chatgpt: { ...account('chatgpt'), models: async () => [{ slug: 'gpt-fixture', name: 'GPT Fixture' }] },
+      claude: account('claude'), gemini: account('gemini'), grok: account('grok'),
+    };
+    await import('/src/main.tsx');
+    const waitFor = async predicate => {
+      for (let i = 0; i < 300; i++) {
+        const result = predicate();
+        if (result) return result;
+        await new Promise(resolve => setTimeout(resolve, 20));
+      }
+      throw new Error('Fixture UI did not initialize');
+    };
+    (await waitFor(() => document.querySelector('.navigation-rail [aria-label="Settings"]'))).click();
+    (await waitFor(() => [...document.querySelectorAll('.dialog-nav-item')].find(node => node.textContent === 'Subscriptions'))).click();
+    document.activeElement?.blur();
+  </script>
+</body>
+</html>

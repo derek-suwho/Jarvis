@@ -3,6 +3,7 @@ import type { TasksBridge } from '../shared/tasks';
 
 export interface ChatGPTStatus {
   connected: boolean;
+  plan?: string | null;
   name?: string | null;
   email: string | null;
   registered: boolean;

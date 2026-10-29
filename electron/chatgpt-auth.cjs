@@ -76,11 +76,19 @@ async function validateIdToken(idToken, { clientId, nonce }) {
 function publicStatus(record) {
   const connected = !!record?.refresh_token && !oauth.refreshExpired(record);
   let name = oauth.profileName(record);
+  let plan = null;
   // Existing installations already saved this token after validating sign-in. Recover its
   // display metadata without requiring another login; no token is sent to the renderer.
-  if (!name && record?.id_token) {
+  if (record?.id_token) {
     try {
-      name = oauth.profileName(oauth.decodeJwt(record.id_token).payload);
+      const claims = oauth.decodeJwt(record.id_token).payload;
+      name ||= oauth.profileName(claims);
+      // Optional display metadata, never an entitlement or authentication check.
+      // SIWC does not guarantee this claim; never infer it from scopes or model access.
+      const reportedPlan = claims?.['https://api.openai.com/auth']?.chatgpt_plan_type;
+      if (connected && typeof reportedPlan === 'string' && /^[a-z][a-z0-9_-]{0,63}$/i.test(reportedPlan)) {
+        plan = reportedPlan.toLowerCase();
+      }
     } catch {
       // Older or malformed records can still fall back to email in the interface.
     }
@@ -88,6 +96,7 @@ function publicStatus(record) {
   return {
     connected,
     name,
+    plan,
     email: record?.email ?? null,
     // A saved registration means "Continue with ChatGPT" reuses the same client.
     registered: !!record?.client_id,

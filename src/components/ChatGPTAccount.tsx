@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { openExternal } from '../lib/desktop';
 import type { ChatGPTAccount } from '../lib/useChatGPT';
+import { chatGPTPlanLabel } from '../lib/subscriptions';
 import { CloseIcon } from './Icons';
 import { SiteIcon } from './SiteIcon';
 import './ChatGPTAccount.css';
@@ -59,9 +60,10 @@ export function ChatGPTConnection({ account }: { account: ChatGPTAccount }) {
 export function ChatGPTStatusLine({ account }: { account: ChatGPTAccount }) {
   const { state } = account;
   if (state.phase === 'connected') {
+    const text = `${state.email ?? 'Connected'} · ${chatGPTPlanLabel(state.plan)}`;
     return (
-      <span className="status-dot connected" title={state.email ?? undefined}>
-        <span className="status-text">{state.email ?? 'Connected'}</span>
+      <span className="status-dot connected" title={text}>
+        <span className="status-text">{text}</span>
       </span>
     );
   }
