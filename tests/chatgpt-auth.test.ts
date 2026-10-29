@@ -30,12 +30,32 @@ const connected = {
 };
 
 describe('ChatGPT public profile status', () => {
+  it('reports optional account plan metadata without exposing tokens or trusting a saved manual choice', () => {
+    const result = status({
+      ...connected, name: 'Saved Name', plan: 'business',
+      id_token: token({ 'https://api.openai.com/auth': { chatgpt_plan_type: 'plus' } }),
+    });
+    expect(result.plan).toBe('plus');
+    expect(JSON.stringify(result)).not.toContain('fixture-refresh-secret');
+    expect(JSON.stringify(result)).not.toContain('fixture-access-secret');
+    expect(status({ ...connected, plan: 'pro' }).plan).toBeNull();
+  });
+
+  it('keeps missing, malformed, and signed-out plan metadata unknown', () => {
+    for (const claim of [null, {}, '', ' ', '<script>', 'x'.repeat(65)]) {
+      expect(status({ ...connected, id_token: token({ 'https://api.openai.com/auth': { chatgpt_plan_type: claim } }) }).plan).toBeNull();
+    }
+    expect(status({ ...connected, id_token: 'malformed' }).plan).toBeNull();
+    expect(status({ id_token: token({ 'https://api.openai.com/auth': { chatgpt_plan_type: 'pro' } }) }).plan).toBeNull();
+  });
+
   it('recovers a display name from an existing session without exposing tokens', () => {
     expect(status({ ...connected, id_token: token({ name: 'Alex Example' }) })).toEqual({
       connected: true,
       registered: true,
       name: 'Alex Example',
       email: 'alex@example.com',
+      plan: null,
     });
   });
 
@@ -47,6 +67,6 @@ describe('ChatGPT public profile status', () => {
 
   it('does not turn profile metadata into an authenticated session', () => {
     expect(status({ name: 'Alex Example', email: 'alex@example.com' }).connected).toBe(false);
-    expect(status(null)).toEqual({ connected: false, registered: false, name: null, email: null });
+    expect(status(null)).toEqual({ connected: false, registered: false, name: null, email: null, plan: null });
   });
 });

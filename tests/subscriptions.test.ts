@@ -1,18 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { sanitizeSubscriptions, setPlan } from '../src/lib/subscriptions';
+import * as subscriptions from '../src/lib/subscriptions';
 
-describe('subscriptions', () => {
-  it('drops unknown providers and plans from stored data', () => {
-    expect(sanitizeSubscriptions({ openai: 'Plus', anthropic: 'Ultra Mega', nope: 'Pro' })).toEqual({ openai: 'Plus' });
-    expect(sanitizeSubscriptions('garbage')).toEqual({});
-    expect(sanitizeSubscriptions(null)).toEqual({});
+describe('account plan labels', () => {
+  it('displays recognized ChatGPT tiers from account metadata', () => {
+    expect(subscriptions.chatGPTPlanLabel).toBeTypeOf('function');
+    for (const [value, label] of [['free', 'Free'], ['plus', 'Plus'], ['prolite', 'Pro'], ['pro', 'Pro (More)'], ['promax', 'Pro (Max)'], ['business', 'Business'], ['team', 'Team']]) {
+      expect(subscriptions.chatGPTPlanLabel(value)).toBe(label);
+    }
   });
 
-  it('adds, changes, and removes a plan', () => {
-    let s = setPlan({}, 'anthropic', 'Max 5x');
-    expect(s).toEqual({ anthropic: 'Max 5x' });
-    s = setPlan(s, 'anthropic', 'Pro');
-    expect(s).toEqual({ anthropic: 'Pro' });
-    expect(setPlan(s, 'anthropic', null)).toEqual({});
+  it('does not invent a tier for missing or unsupported metadata', () => {
+    expect(subscriptions.chatGPTPlanLabel).toBeTypeOf('function');
+    for (const value of [null, undefined, '', 'future-tier', {}, '<script>']) {
+      expect(subscriptions.chatGPTPlanLabel(value)).toBe('Plan unavailable');
+    }
   });
 });

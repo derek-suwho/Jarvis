@@ -20,6 +20,7 @@
 - Verify the exact npm command users will run; individually valid CLI flags can conflict. Ralph's `--autonomous` and `--no-tui` are mutually exclusive.
 - Resolve profile identity from saved preferences or connected account metadata; never leave a signed-in person's profile labeled You. Keep global navigation separate from scrolling chat history when the reference does.
 - Gate provider plan controls and model availability on verified sign-in; a locally selected plan or opened login page is not an authenticated account.
+- Display subscription plans from provider account metadata. Remove manual selectors that only save a label; missing metadata stays unknown rather than implying a tier or entitlement.
 - Check CLI auth parsers against published or observed output, including login preludes and trailing failures. Mock success alone does not prove live compatibility.
 - Serialize login/logout with status checks, and wait for owned provider processes during app shutdown. Do not block normal user configuration merely because it exists; restrict actual executable capabilities.
 - Verify skill invocation in the user's actual client. Codex CLI uses `$name` or `/skills`; a skill file does not register a `/<name>` CLI command. Distinguish file validation from picker discovery.
