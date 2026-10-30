@@ -1,0 +1,36 @@
+[
+  {
+    "id": "chat-synthetic-1",
+    "conversation_id": "chat-synthetic-1",
+    "title": "Synthetic garden plan",
+    "create_time": 1700000000,
+    "update_time": 1700000002,
+    "current_node": "answer-node",
+    "mapping": {
+      "answer-node": {
+        "id": "answer-node",
+        "parent": "question-node",
+        "children": [],
+        "message": {
+          "id": "answer-1",
+          "author": { "role": "assistant" },
+          "create_time": 1700000002,
+          "content": { "content_type": "text", "parts": ["Plant basil.", "Water weekly."] },
+          "metadata": { "model_slug": "synthetic-model" }
+        }
+      },
+      "root": { "id": "root", "parent": null, "children": ["question-node"], "message": null },
+      "question-node": {
+        "id": "question-node",
+        "parent": "root",
+        "children": ["answer-node"],
+        "message": {
+          "id": "question-1",
+          "author": { "role": "user" },
+          "create_time": 1700000001,
+          "content": { "content_type": "text", "parts": ["Plan a small herb garden."] }
+        }
+      }
+    }
+  }
+]

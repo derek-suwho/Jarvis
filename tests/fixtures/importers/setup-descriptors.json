@@ -1,0 +1,23 @@
+[
+  {
+    "source": "claude-code",
+    "sourceId": "synthetic-instructions",
+    "category": "instructions",
+    "scope": { "kind": "user" },
+    "contentDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  {
+    "source": "codex",
+    "sourceId": "synthetic-mcp",
+    "category": "mcp-server",
+    "scope": { "kind": "project", "projectId": "synthetic-project" },
+    "contentDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  {
+    "source": "claude-cowork",
+    "sourceId": "synthetic-project-memory",
+    "category": "project-memory",
+    "scope": { "kind": "project", "projectId": "synthetic-project" },
+    "contentDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  }
+]
