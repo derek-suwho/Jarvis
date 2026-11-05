@@ -117,9 +117,14 @@ const persistedMediaIds = new Set<string>();
 const storageErrorListeners = new Set<(message: string) => void>();
 let pendingStorageError: string | null = null;
 type PendingSave = { chats: Chat[]; resolve: (() => void)[]; reject: ((error: unknown) => void)[] };
-let pendingSave: PendingSave | undefined;
+type CheckpointBarrier = { run: () => Promise<void>; resolve: () => void; reject: (error: unknown) => void };
+const checkpointQueue: (PendingSave | CheckpointBarrier)[] = [];
 let saving = false;
 let lastRetainedMediaIds: Set<string> | undefined;
+let desktopChats: Chat[] | undefined;
+let desktopRestoreReady = false;
+let desktopMediaAuthoritative = false;
+const checkpointBridge = () => typeof window === 'undefined' ? undefined : window.jarvis?.checkpoints;
 
 function storageError(message: string): void {
   if (storageErrorListeners.size) {
@@ -159,6 +164,7 @@ function inlineMedia(attachment: Attachment): StoredMedia | undefined {
 }
 
 function readChatMetadata(): Chat[] {
+  if (desktopChats !== undefined) return desktopChats;
   try {
     const parsed: unknown = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]');
     return Array.isArray(parsed) ? parsed.filter(isChat).filter((chat) => !chat.temporary) : [];
@@ -169,7 +175,29 @@ function readChatMetadata(): Chat[] {
 
 /** Load saved bytes before the first chat render; a missing file remains an explicit unavailable attachment. */
 export async function initializeChatMedia(): Promise<void> {
+  const checkpoints = checkpointBridge();
+  if (checkpoints) {
+    try {
+      // Null alone permits migration from the browser archive; [] means deleted history.
+      const restored = await checkpoints.load();
+      desktopMediaAuthoritative = restored !== null;
+      desktopChats = restored ?? readChatMetadata();
+      desktopRestoreReady = true;
+    } catch {
+      desktopChats = [];
+      storageError('Could not restore saved conversations. Reopen Jarvis before saving new conversations.');
+      return;
+    }
+  }
   const attachments = readChatMetadata().flatMap((chat) => chat.messages.flatMap((message) => message.attachments ?? []));
+  // SQLite restores complete attachment payloads. ID-only browser caches can
+  // alias reused IDs or revive stale bytes; consult them only for migration.
+  if (desktopMediaAuthoritative) {
+    if (attachments.some((attachment) => mediaType(attachment.type) && !inlineMedia(attachment))) {
+      storageError('Some saved attachments are unavailable. Reattach the original files in a new chat.');
+    }
+    return;
+  }
   const missingIds: string[] = [];
   for (const attachment of attachments) {
     const inline = inlineMedia(attachment);
@@ -197,7 +225,7 @@ export function loadChats(): Chat[] {
       ...message,
       ...(message.attachments ? {
         attachments: message.attachments.map((attachment) => {
-          const media = inlineMedia(attachment) ?? mediaCache.get(attachment.id);
+          const media = inlineMedia(attachment) ?? (desktopMediaAuthoritative ? undefined : mediaCache.get(attachment.id));
           if (!media || media.type !== normalizedMediaType(attachment.type)) return attachment;
           return {
             ...attachment,
@@ -211,8 +239,36 @@ export function loadChats(): Chat[] {
   }));
 }
 
+/** Omit only image previews that restore can reconstruct exactly from source bytes. */
+function desktopCheckpointSnapshot(chats: Chat[]): Chat[] {
+  return chats.filter((chat) => !chat.temporary).map((chat) => ({
+    ...chat,
+    messages: chat.messages.map((message) => ({
+      ...message,
+      ...(message.attachments ? { attachments: message.attachments.map((attachment) => {
+        // The renderer reconstructs this preview from data on restore. Sending
+        // both doubles image history size before the main process can split media.
+        if (attachment.data !== undefined && imageType(attachment.type)
+          && attachment.preview === `data:${attachment.type};base64,${attachment.data}`) {
+          const { preview: _preview, ...media } = attachment;
+          return media;
+        }
+        return attachment;
+      }) } : {}),
+    })),
+  }));
+}
+
 /** Serialized saves preserve ordering and never put media bytes in localStorage. */
 async function writeChats(chats: Chat[]): Promise<void> {
+  const checkpoints = checkpointBridge();
+  if (checkpoints) {
+    if (!desktopRestoreReady) throw new Error('Desktop conversation restore is unavailable.');
+    const saved = desktopCheckpointSnapshot(chats);
+    if (!await checkpoints.save(saved)) throw new Error('Desktop checkpoint was not saved.');
+    desktopChats = saved;
+    return;
+  }
   const rows = new Map<string, StoredMedia>();
   const retainedIds = new Set<string>();
   const metadata = chats.filter((chat) => !chat.temporary).map((chat) => ({
@@ -260,30 +316,80 @@ async function writeChats(chats: Chat[]): Promise<void> {
 /** Coalesce pending checkpoints; receipts resolve only after media and metadata are durable. */
 export function saveChats(chats: Chat[]): Promise<void> {
   const receipt = new Promise<void>((resolve, reject) => {
-    if (pendingSave) {
-      pendingSave.chats = chats;
-      pendingSave.resolve.push(resolve);
-      pendingSave.reject.push(reject);
-    } else pendingSave = { chats, resolve: [resolve], reject: [reject] };
+    // Capture the accepted state before yielding to the queued writer. Callers
+    // retain their objects and may edit them while a durable save is pending.
+    // Temporary history is never durable; exclude it before copying potentially
+    // large media into the queue, rather than only at the eventual writer.
+    const durable = chats.filter((chat) => !chat.temporary);
+    const snapshot = structuredClone(checkpointBridge() ? desktopCheckpointSnapshot(durable) : durable);
+    const pending = checkpointQueue.at(-1);
+    if (pending && 'chats' in pending) {
+      pending.chats = snapshot;
+      pending.resolve.push(resolve);
+      pending.reject.push(reject);
+    } else checkpointQueue.push({ chats: snapshot, resolve: [resolve], reject: [reject] });
   });
-  if (!saving) {
-    saving = true;
-    queueMicrotask(async () => {
-      while (pendingSave) {
-        const save = pendingSave;
-        pendingSave = undefined;
-        try {
-          await writeChats(save.chats);
-          save.resolve.forEach((resolve) => resolve());
-        } catch (error) {
-          storageError('Could not save this conversation or its attachments. Keep Jarvis open and free storage space before retrying.');
-          save.reject.forEach((reject) => reject(error));
-        }
-      }
-      saving = false;
-    });
-  }
+  drainCheckpoints();
   return receipt;
+}
+
+/** Order destructive maintenance between accepted checkpoint writes.
+ * Callers must also fence stale renderer state before accepting new saves.
+ */
+export function withChatCheckpointBarrier(run: () => Promise<void>): Promise<void> {
+  const receipt = new Promise<void>((resolve, reject) => {
+    checkpointQueue.push({ run, resolve, reject });
+  });
+  drainCheckpoints();
+  return receipt;
+}
+
+/** Refresh the renderer cache from durable deletion results before releasing maintenance.
+ * Callers must pause renderer saves until they have consumed loadChats(). Failed
+ * maintenance or reload blocks desktop saves until authoritative reconciliation.
+ */
+export function reconcileChatCheckpoint(run: () => Promise<void>): Promise<void> {
+  return withChatCheckpointBarrier(async () => {
+    const checkpoints = checkpointBridge();
+    if (!checkpoints) throw new Error('Desktop conversation storage is unavailable.');
+    // Maintenance can commit before its receipt fails. Fence stale evidence even
+    // when the operation rejects; only an authoritative reload may reopen saves.
+    desktopRestoreReady = false;
+    desktopChats = [];
+    mediaCache.clear();
+    persistedMediaIds.clear();
+    await run();
+    const restored = await checkpoints.load();
+    if (restored === null) throw new Error('Desktop conversation checkpoint is unavailable.');
+    desktopChats = restored;
+    desktopMediaAuthoritative = true;
+    desktopRestoreReady = true;
+  });
+}
+
+function drainCheckpoints(): void {
+  if (saving) return;
+  saving = true;
+  queueMicrotask(async () => {
+    while (checkpointQueue.length) {
+      const operation = checkpointQueue.shift()!;
+      try {
+        if ('chats' in operation) {
+          await writeChats(operation.chats);
+          operation.resolve.forEach((resolve) => resolve());
+        } else {
+          await operation.run();
+          operation.resolve();
+        }
+      } catch (error) {
+        if ('chats' in operation) {
+          storageError('Could not save this conversation or its attachments. Keep Jarvis open and free storage space before retrying.');
+          operation.reject.forEach((reject) => reject(error));
+        } else operation.reject(error);
+      }
+    }
+    saving = false;
+  });
 }
 
 /** Splits a reply into word-sized pieces for the simulated stream, keeping whitespace. */

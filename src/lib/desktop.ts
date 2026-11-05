@@ -106,6 +106,13 @@ export type ChatGPTSignInResult = { ok: true; status: ChatGPTStatus } | { ok: fa
 
 /** Bridge exposed by electron/preload.cjs; absent when running in a normal browser. */
 interface JarvisBridge {
+  projects?: {
+    delete: (id: string) => Promise<boolean>;
+  };
+  checkpoints?: {
+    load: () => Promise<import('../shared/chatTypes').Chat[] | null>;
+    save: (chats: import('../shared/chatTypes').Chat[]) => Promise<boolean>;
+  };
   tasks?: TasksBridge;
   isDesktop: true;
   platform: string;
@@ -160,23 +167,37 @@ export interface WebviewElement extends HTMLWebViewElement {
 
 export const isDesktop = (): boolean => typeof window !== 'undefined' && !!window.jarvis?.isDesktop;
 
-export function openExternal(url: string): void {
-  if (window.jarvis) void window.jarvis.openExternal(url);
-  else window.open(url, '_blank', 'noopener,noreferrer');
+export async function openExternal(url: string, notify?: (message: string) => void): Promise<void> {
+  try {
+    if (window.jarvis) await window.jarvis.openExternal(url);
+    else window.open(url, '_blank', 'noopener,noreferrer');
+  } catch {
+    notify?.('Could not open in your browser. Try again.');
+  }
 }
 
 export const isMac = (): boolean => window.jarvis?.platform === 'darwin';
 
 /** Saves text through the native dialog on desktop, or as a browser download. */
-export async function saveTextFile(name: string, content: string, mime: string): Promise<void> {
+export async function saveTextFile(name: string, content: string, mime: string): Promise<boolean> {
   if (window.jarvis) {
-    await window.jarvis.saveFile(name, content);
-    return;
+    return await window.jarvis.saveFile(name, content);
   }
   const url = URL.createObjectURL(new Blob([content], { type: mime }));
   const a = Object.assign(document.createElement('a'), { href: url, download: name });
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 0);
+  return true;
+}
+
+/** Reports export outcomes without exposing filesystem or IPC error details. */
+export async function exportTextFile(name: string, content: string, mime: string, notify: (message: string) => void): Promise<void> {
+  const native = !!window.jarvis;
+  try {
+    if (await saveTextFile(name, content, mime)) notify(native ? 'Export saved' : 'Download started');
+  } catch {
+    notify('Could not export. Try again.');
+  }
 }
 
 export function fileSlug(title: string): string {

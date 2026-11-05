@@ -46,8 +46,8 @@ function harness(config: { tools?: Promise<unknown>; lookup?: Promise<string> } 
     },
   });
   const events: any[] = [];
-  const open = (continuation?: unknown, updates: any[] = []) => module.exports.openAttempt({
-    request, continuation, updates, attemptId: `attempt-${children.length}`,
+  const open = (continuation?: unknown, updates: any[] = [], toolsDisabled = false) => module.exports.openAttempt({
+    request, continuation, updates, toolsDisabled, attemptId: `attempt-${children.length}`,
   }, (event: unknown) => events.push(event));
   const line = (child: any, event: object) => child.stdout.emit('data', `${JSON.stringify(event)}\n`);
   const session = (child: any) => flag(child.args, '--session-id') || flag(child.args, '--resume');
@@ -259,3 +259,16 @@ describe('Claude task sessions', () => {
     expect(result.continuation).toBeUndefined();
   });
 });
+
+ it('keeps extraction attempts tool-free without reading configured MCP servers', async () => {
+    const h = harness({ tools: new Promise(() => {}) });
+    const attempt = h.open(undefined, [], true);
+    await tick();
+    expect(h.children).toHaveLength(1);
+    const child = h.children[0];
+    expect(child.args).toContain('--strict-mcp-config');
+    expect(flag(child.args, '--tools')).toBe('');
+    expect(child.args).not.toContain('--mcp-config');
+    h.finish(child);
+    expect((await attempt.settled).kind).toBe('complete');
+  });

@@ -22,7 +22,7 @@ interface Props {
   onSend: (text: string, attachments: Attachment[]) => Promise<TaskResult | void> | void;
   validateSend?: (text: string, attachments: Attachment[]) => string | null;
   onStop?: () => void;
-  onEdit?: (messageId: string, text: string) => void;
+  onEdit?: (messageId: string, text: string) => void | boolean | Promise<void | boolean>;
   onRegenerate?: (messageId: string) => void;
   onFeedback?: (messageId: string, f: Feedback | undefined) => void;
   /** Id of the assistant message currently streaming. */

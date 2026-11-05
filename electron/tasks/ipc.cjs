@@ -7,8 +7,8 @@ function registerTaskIpc(ipcMain, runtime, { isTrusted, notifications, ready }) 
   for (const name of ['queue', 'removeQueued', 'interrupt', 'stop', 'snapshot', 'ack', 'markRead', 'setVisibleTargets']) {
     handle(name, (_event, input) => runtime[name](input));
   }
-  handle('forgetTarget', async (_event, target) => {
-    await runtime.forgetTarget(target);
+  handle('forgetTarget', async (_event, target, preserveHistory = false) => {
+    await runtime.forgetTarget(target, preserveHistory);
     notifications.forgetTarget(target);
   });
   handle('detach', (_event, ids) => {

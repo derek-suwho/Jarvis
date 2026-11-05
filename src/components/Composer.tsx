@@ -142,18 +142,28 @@ export function Composer({
     const current = recognition.current;
     if (current) { current.onresult = null; current.stop(); recognition.current = null; setListening(false); }
     submittingRef.current = true;
+    setSendError(null);
     setSubmitting(true);
+    const focusAtSubmit = typeof document === 'undefined' ? null : document.activeElement;
     try {
       const result = await onSend(draft.text.trim(), draft.attachments);
-      if (result && !result.ok) { setSendError(result.message); return; }
+      if (result && !result.ok) {
+        if (activeKey.current === key) setSendError(result.message);
+        return;
+      }
       consumeSubmittedDraft(key, submitted, persistent);
-      setNotice('');
+      if (activeKey.current === key) setNotice('');
     } catch (error) {
-      setSendError(error instanceof Error ? error.message : 'Could not send. Your draft is still here.');
+      if (activeKey.current === key) {
+        setSendError(error instanceof Error ? error.message : 'Could not send. Your draft is still here.');
+      }
     } finally {
       submittingRef.current = false;
       setSubmitting(false);
-      if (activeKey.current === key) ref.current?.focus();
+      // A delayed reply must not pull keyboard users away from their next action.
+      const focusUnchanged = typeof document === 'undefined' ||
+        document.activeElement === focusAtSubmit || document.activeElement === document.body;
+      if (activeKey.current === key && focusUnchanged) ref.current?.focus();
     }
   };
 
@@ -191,6 +201,7 @@ export function Composer({
     <div className="composer-shell">
       <div
         className={`composer${dragging ? ' dragging' : ''}`}
+        aria-busy={pendingFiles > 0 || submitting}
         onDragEnter={(event) => {
           if (!event.dataTransfer.types.includes('Files')) return;
           event.preventDefault();
@@ -232,6 +243,7 @@ export function Composer({
                   onClick={() => {
                     removeDraftAttachment(key, file.id, persistent);
                     setNotice('File removed');
+                    ref.current?.focus();
                   }}
                 >
                   <CloseIcon />
@@ -241,17 +253,17 @@ export function Composer({
           </div>
         )}
         {errors.length > 0 && (
-          <div className="composer-errors" role="alert">
+          <div id={`${instanceId}-file-errors`} className="composer-errors" role="alert">
             <div>{errors.map((error) => <p key={error}>{error}</p>)}</div>
-            <button type="button" className="icon-btn" aria-label="Dismiss file errors" onClick={() => clearDraftErrors(key, persistent)}>
+            <button type="button" className="icon-btn" aria-label="Dismiss file errors" onClick={() => { clearDraftErrors(key, persistent); ref.current?.focus(); }}>
               <CloseIcon />
             </button>
           </div>
         )}
         {sendError && (
-          <div className="composer-errors" role="alert">
+          <div id={`${instanceId}-send-error`} className="composer-errors" role="alert">
             <p>{sendError}</p>
-            <button type="button" className="icon-btn" aria-label="Dismiss message error" onClick={() => setSendError(null)}>
+            <button type="button" className="icon-btn" aria-label="Dismiss message error" onClick={() => { setSendError(null); ref.current?.focus(); }}>
               <CloseIcon />
             </button>
           </div>
@@ -260,7 +272,7 @@ export function Composer({
           ref={ref}
           rows={1}
           aria-label="Message"
-          aria-describedby={hintId}
+          aria-describedby={[hintId, errors.length > 0 && `${instanceId}-file-errors`, sendError && `${instanceId}-send-error`].filter(Boolean).join(' ')}
           autoFocus={autoFocus}
           placeholder={listening ? 'Listening…' : (placeholder ?? (disabled ? 'Write a follow-up…' : 'Ask anything'))}
           value={text}
@@ -272,9 +284,10 @@ export function Composer({
             void addFiles(pasted);
           }}
           onKeyDown={(event) => {
-            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+            if (event.defaultPrevented) return;
+            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) {
               event.preventDefault();
-              submit();
+              if (!event.repeat) submit();
             }
           }}
         />

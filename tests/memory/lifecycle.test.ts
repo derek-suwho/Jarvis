@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { migrate } from '../../desktop/storage/migrations';
 import { openDatabase } from '../../desktop/storage/database';
 import { createChatStore } from '../../desktop/storage/chats';
 import { createProjectStore } from '../../desktop/storage/projects';
@@ -65,6 +66,35 @@ describe('memory lifecycle', () => {
       facts: [fact(t, value, kind)],
     });
   }
+  it('migrates existing lexical indexes to word-form recall without reviving forgotten facts', () => {
+    const active = turn('Use SQLite');
+    apply(active, 'SQLite');
+    const forgotten = turn('Use Redis');
+    const other = fact(forgotten, 'Redis');
+    other.key = 'cache';
+    forgotten.memory.apply(forgotten.job!.id, { summary: '', facts: [other] });
+    active.memory.forget(active.memory.list().find(f => f.value === 'Redis')!.id);
+    // Recreate the pre-stemming index and ledger to exercise an existing user's upgrade.
+    db.exec(`DROP TABLE memory_fts;
+      CREATE VIRTUAL TABLE memory_fts USING fts5(id UNINDEXED, subject, key, value, keywords);
+      INSERT INTO memory_fts(id,subject,key,value,keywords)
+        SELECT id,subject,key,value,keywords_json FROM memory_records WHERE status='active';
+      DELETE FROM schema_migrations WHERE version = 5;`);
+    expect(active.memory.searchIndex('databases')).toEqual([]);
+    migrate(db);
+    expect(active.memory.searchIndex('databases').map(f => f.value)).toEqual(['SQLite']);
+    expect(active.memory.searchIndex('Redis')).toEqual([]);
+    migrate(db);
+    expect(active.memory.searchIndex('databases')).toHaveLength(1);
+    active.memory.forget(active.memory.list().find(f => f.value === 'SQLite')!.id);
+    expect(active.memory.searchIndex('databases')).toEqual([]);
+    const fresh = turn('Use DuckDB');
+    // A new identity exercises insertion into the rebuilt index.
+    const inserted = fact(fresh, 'DuckDB');
+    inserted.key = 'analytics';
+    fresh.memory.apply(fresh.job!.id, { summary: '', facts: [inserted] });
+    expect(fresh.memory.searchIndex('analytics').map(f => f.value)).toEqual(['DuckDB']);
+  });
   it('merges repeated General keys and indexes only active records', () => {
     const a = turn('Use SQLite'),
       b = turn('Use SQLite');

@@ -15,6 +15,8 @@ export interface BrowserState {
  */
 export interface SideChatState {
   sourceTitle: string | null;
+  sourceChatId?: string;
+  sourceProjectId?: string;
   /** Project scope is frozen with the source conversation. */
   projectInstructions?: string;
   context: Message[];
@@ -32,14 +34,17 @@ export function createBrowserTab(): Tab {
 }
 
 export function createSideChat(
-  source: { title: string; messages: Message[] } | null,
+  source: { id?: string; projectId?: string; title: string; messages: Message[] } | null,
   projectInstructions?: string,
+  projectId?: string,
 ): Tab {
   return {
     id: newId(),
     kind: 'sidechat',
     sidechat: {
       sourceTitle: source?.title ?? null,
+      sourceChatId: source?.id,
+      sourceProjectId: projectId ?? source?.projectId,
       context: source ? [...source.messages] : [],
       messages: [],
       ...(projectInstructions ? { projectInstructions } : {}),

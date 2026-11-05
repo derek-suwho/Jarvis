@@ -246,7 +246,7 @@ function queuedContent(messages) {
  * A CLI attempt settles only after its process exits. SIGINT requests a resumable turn boundary;
  * SIGTERM stops work. A returned continuation is main-process data, never renderer input.
  */
-function openAttempt({ request, continuation, updates = [], emitResultText = true }, emit) {
+function openAttempt({ request, continuation, updates = [], emitResultText = true, toolsDisabled = false }, emit) {
   let resolveSettled;
   const settled = new Promise((resolve) => { resolveSettled = resolve; });
   let child = null;
@@ -401,11 +401,12 @@ function openAttempt({ request, continuation, updates = [], emitResultText = tru
       const bin = await findClaude();
       if (failBeforeSpawn()) return;
       if (!bin) throw new Error('Claude Code is not installed, so Jarvis cannot reach Claude.');
-      const mcp = await tools.claudeMcpConfigFile().catch(() => null);
+      const mcp = toolsDisabled ? null : await tools.claudeMcpConfigFile().catch(() => null);
       if (failBeforeSpawn()) return;
       const resume = continuation && !continuation.pending
         ? { sessionId: continuation.sessionId, content: queuedContent(cleanUpdates) } : null;
       const built = buildArgs(req, mcp, resume);
+      if (toolsDisabled) built.args.push('--strict-mcp-config');
       sessionId = built.sessionId;
       if (failBeforeSpawn()) return;
       child = spawn(bin, built.args, { cwd: workspace(), stdio: ['pipe', 'pipe', 'pipe'] });

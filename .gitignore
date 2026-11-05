@@ -11,3 +11,12 @@ temporary screenshots/
 .ralph/
 PROMPT.md
 .runtime/providers/
+.ralph/logs/
+.ralph/state.json
+.ralph/STOP
+.ralph/lock
+__pycache__/
+.pytest_cache/
+core
+core.*
+release/

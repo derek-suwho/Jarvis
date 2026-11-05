@@ -46,19 +46,39 @@ export function TabPanel(p: Props) {
   return (
     <section ref={ref} className="tab-panel" style={!p.fullView && width ? { flexBasis: width } : undefined}>
       {!p.fullView && (
-        <ResizeHandle label="Resize side panel" edge="left" measure={() => ref.current?.offsetWidth ?? 0} onResize={setWidth} onReset={() => setWidth(null)} />
+        <ResizeHandle minWidth={360} maxWidth={1600} label="Resize side panel" edge="left" measure={() => ref.current?.offsetWidth ?? 0} onResize={setWidth} onReset={() => setWidth(null)} />
       )}
       {/* The tab strip doubles as this pane's title bar, like ChatGPT desktop. */}
       <div className="tab-strip" role="tablist" aria-label="Workspace tabs">
-        {p.tabs.map((t) => (
+        {p.tabs.map((t, index) => (
           <div
             key={t.id}
             className={`tab${t.id === p.activeTabId ? ' active' : ''}${t.kind === 'sidechat' ? ' side' : ''}`}
             role="tab"
+            id={`workspace-tab-${encodeURIComponent(t.id)}`}
+            aria-controls={`workspace-panel-${encodeURIComponent(t.id)}`}
             aria-selected={t.id === p.activeTabId}
-            tabIndex={0}
+            tabIndex={t.id === p.activeTabId || (!p.tabs.some(tab => tab.id === p.activeTabId) && index === 0) ? 0 : -1}
             onKeyDown={(event) => {
-              if (event.target !== event.currentTarget) return;
+              if (event.target !== event.currentTarget || event.defaultPrevented || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+              if (event.key === 'Delete') {
+                event.preventDefault();
+                if (p.tabs.length > 1) {
+                  const neighbor = index < p.tabs.length - 1 ? index + 1 : index - 1;
+                  event.currentTarget.parentElement?.querySelectorAll<HTMLElement>('[role="tab"]')[neighbor]?.focus();
+                }
+                p.onClose(t.id);
+                return;
+              }
+              const destination = event.key === 'ArrowLeft' ? (index + p.tabs.length - 1) % p.tabs.length
+                : event.key === 'ArrowRight' ? (index + 1) % p.tabs.length
+                : event.key === 'Home' ? 0 : event.key === 'End' ? p.tabs.length - 1 : null;
+              if (destination !== null) {
+                event.preventDefault();
+                p.onSelect(p.tabs[destination].id);
+                event.currentTarget.parentElement?.querySelectorAll<HTMLElement>('[role="tab"]')[destination]?.focus();
+                return;
+              }
               if (event.key === 'Enter' || event.key === ' ') {
                 event.preventDefault();
                 p.onSelect(t.id);
@@ -75,6 +95,10 @@ export function TabPanel(p: Props) {
               title="Close tab"
               onClick={(e) => {
                 e.stopPropagation();
+                if (p.tabs.length > 1) {
+                  const neighbor = index < p.tabs.length - 1 ? index + 1 : index - 1;
+                  e.currentTarget.parentElement?.parentElement?.querySelectorAll<HTMLElement>('[role="tab"]')[neighbor]?.focus();
+                }
                 p.onClose(t.id);
               }}
             >
@@ -91,14 +115,15 @@ export function TabPanel(p: Props) {
         </button>
       </div>
 
-      {/* Inactive tabs stay mounted (hidden) so pages keep their state and scroll position. */}
+      {/* Keep tab UI state mounted; only the active browser may own a live page. */}
       {p.tabs.map((t) => {
         const task = p.tasks.find((item) => item.target.kind === 'sidechat' && item.target.id === t.id && isActiveTask(item));
         return (
-        <div key={t.id} className="tab-body" hidden={t.id !== p.activeTabId}>
+        <div key={t.id} className="tab-body" role="tabpanel" tabIndex={0} id={`workspace-panel-${encodeURIComponent(t.id)}`} aria-labelledby={`workspace-tab-${encodeURIComponent(t.id)}`} hidden={t.id !== p.activeTabId}>
           {t.kind === 'browser' ? (
             <BrowserTab
               state={t.browser}
+              active={t.id === p.activeTabId}
               onChange={(s) => p.onBrowserChange(t.id, s)}
               onOpenSideChat={() => p.onConvertToSideChat(t.id)}
             />

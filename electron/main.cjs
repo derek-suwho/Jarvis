@@ -12,14 +12,28 @@ const { createTaskCoordinator } = require('./tasks/coordinator.cjs');
 const { createTaskNotifications } = require('./tasks/notifications.cjs');
 const { registerTaskIpc } = require('./tasks/ipc.cjs');
 const { openPreviewAttempt } = require('./tasks/preview.cjs');
+const { registerCheckpointIpc } = require('./checkpoints.cjs');
+const { registerProjectIpc } = require('./projects.cjs');
 const appWindows = new Set();
 const readyWindows = new Set();
 let pendingTarget = null;
 let taskRuntime;
+let desktopStorage;
 
 const focusedApp = () => [...appWindows].some((win) => !win.isDestroyed() && win.isFocused());
 const isTrustedSender = (event) => [...appWindows].some((win) => !win.isDestroyed()
   && win.webContents === event.sender && event.senderFrame === event.sender.mainFrame);
+// Register every privileged route through the same main-frame boundary.
+const trustedIpc = Object.fromEntries(['handle', 'on'].map((method) => [method, (channel, handler) =>
+  ipcMain[method](channel, (event, ...args) => {
+    if (!isTrustedSender(event)) {
+      if (method === 'handle') throw new Error('Untrusted app request.');
+      return; // One-way messages have no rejection channel; discard without throwing in main.
+    }
+    return handler(event, ...args);
+  }),
+]));
+
 function openTaskTarget(target) {
   let win = [...appWindows].find((item) => !item.isDestroyed());
   if (!win) win = createWindow();
@@ -90,6 +104,10 @@ function createWindow() {
 }
 
 app.on('web-contents-created', (_event, contents) => {
+  // Apply to the actual session, including persistent partitions used by webviews.
+  // Device, location, clipboard and other capabilities need an explicit product consent flow.
+  contents.session.setPermissionCheckHandler(() => false);
+  contents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   // Every <webview> is an untrusted page: no preload, no Node, sandboxed, http(s) only.
   contents.on('will-attach-webview', (event, webPreferences, params) => {
     delete webPreferences.preload;
@@ -108,19 +126,19 @@ app.on('web-contents-created', (_event, contents) => {
   }
 });
 
-ipcMain.handle('open-external', (_event, url) => {
+trustedIpc.handle('open-external', (_event, url) => {
   if (typeof url === 'string' && isHttpUrl(url)) return shell.openExternal(url);
 });
 
 const THEMES = new Set(['system', 'dark', 'light']);
-ipcMain.on('set-theme', (event, theme) => {
+trustedIpc.on('set-theme', (event, theme) => {
   if (!THEMES.has(theme)) return;
   nativeTheme.themeSource = theme;
   BrowserWindow.fromWebContents(event.sender)?.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#212121' : '#ffffff');
 });
 
 const SAVE_TYPES = { '.md': 'Markdown', '.json': 'JSON' };
-ipcMain.handle('save-file', async (event, name, content) => {
+trustedIpc.handle('save-file', async (event, name, content) => {
   if (typeof name !== 'string' || typeof content !== 'string') return false;
   const base = path.basename(name);
   const ext = path.extname(base);
@@ -192,26 +210,31 @@ function buildMenu() {
 }
 
 app.whenReady().then(() => {
-  chatgptAuth.registerIpc(ipcMain);
-  chatgptInference.registerIpc(ipcMain);
-  claudeCode.registerIpc(ipcMain);
-  const accountIpc = {
-    handle: (channel, handler) => ipcMain.handle(channel, (event, ...args) => {
-      if (!isTrustedSender(event)) throw new Error('Untrusted account request.');
-      return handler(event, ...args);
-    }),
-  };
+  const { openDesktopStorage } = require(path.join(__dirname, '..', 'dist', 'backend', 'storage.cjs'));
+  desktopStorage = openDesktopStorage(path.join(app.getPath('userData'), 'jarvis.sqlite'), {
+    getAdapter: (provider) => require('./memory-adapter.cjs').createMemoryAdapter(provider, (input, emit) =>
+      provider === 'chatgpt' ? chatgptInference.openAttempt(input, emit, async () => [])
+        : provider === 'claude' ? claudeCode.openAttempt(input, emit)
+        : provider === 'gemini' ? geminiCli.openAttempt(input, emit)
+        : grokCli.openAttempt(input, emit)),
+  });
+  registerCheckpointIpc(trustedIpc, desktopStorage.checkpoints);
+  registerProjectIpc(trustedIpc, desktopStorage.projects);
+  chatgptAuth.registerIpc(trustedIpc);
+  chatgptInference.registerIpc(trustedIpc);
+  claudeCode.registerIpc(trustedIpc);
   for (const [provider, adapter] of [['gemini', geminiCli], ['grok', grokCli]]) {
-    adapter.registerIpc(accountIpc);
-    registerSubscriptionStream(ipcMain, provider, adapter, isTrustedSender);
+    adapter.registerIpc(trustedIpc);
+    registerSubscriptionStream(trustedIpc, provider, adapter, isTrustedSender);
   }
-  tools.registerIpc(ipcMain);
+  tools.registerIpc(trustedIpc);
   const notifications = createTaskNotifications({
     isFocused: focusedApp,
     openTarget: openTaskTarget,
     createNotification: (options) => Notification.isSupported() ? new Notification(options) : null,
   });
   taskRuntime = createTaskCoordinator({
+    storage: desktopStorage,
     isFocused: focusedApp,
     emit: (event) => {
       for (const win of appWindows) if (!win.isDestroyed()) win.webContents.send('tasks:event', event);
@@ -222,7 +245,7 @@ app.whenReady().then(() => {
       : input.provider === 'gemini' ? geminiCli.openAttempt(input, emit)
       : input.provider === 'grok' ? grokCli.openAttempt(input, emit) : openPreviewAttempt(input, emit),
   });
-  registerTaskIpc(ipcMain, taskRuntime, {
+  registerTaskIpc(trustedIpc, taskRuntime, {
     notifications,
     isTrusted: isTrustedSender,
     ready: (sender) => {
@@ -250,7 +273,7 @@ app.on('before-quit', (event) => {
   let deadline;
   const timeout = new Promise((resolve) => { deadline = setTimeout(resolve, 5000); });
   providerShutdown = Promise.race([
-    Promise.allSettled([geminiCli.shutdown(), grokCli.shutdown()]),
+    Promise.allSettled([desktopStorage?.close(), geminiCli.shutdown(), grokCli.shutdown(), tools.shutdown()]),
     timeout,
   ]).finally(() => {
     clearTimeout(deadline);

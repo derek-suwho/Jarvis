@@ -32,12 +32,14 @@ export function applyTaskSnapshot(chats: Chat[], task: TaskSnapshot): Chat[] {
 }
 
 export function recoverInterruptedMessages(chats: Chat[], tasks: TaskSnapshot[]): Chat[] {
-  const active = new Set(tasks.filter(isActiveTask).map((task) => task.id));
+  const active = tasks.filter((task) => isActiveTask(task) && task.target.kind === 'chat');
   return chats.map((chat) => ({ ...chat, messages: chat.messages.map((message) => {
-    if (!message.taskId || active.has(message.taskId)) return message;
+    if (!message.taskId || active.some((task) => task.id === message.taskId
+      && task.target.id === chat.id && task.target.generation === chatTarget(chat).generation)) return message;
     const partial = message.role === 'assistant' && message.attemptId && !message.outcome;
     const queued = message.delivery === 'queued' || message.delivery === 'applying';
-    return partial || queued ? { ...message,
+    const runningTools = message.tools?.some((tool) => tool.status === 'running');
+    return partial || queued || runningTools ? { ...message,
       ...(partial ? { outcome: 'interrupted' as const } : {}),
       ...(queued ? { delivery: 'cancelled' as const } : {}),
       ...(message.tools ? { tools: message.tools.map((tool) => tool.status === 'running' ? { ...tool, status: 'error' as const } : tool) } : {}),

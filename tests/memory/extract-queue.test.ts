@@ -143,8 +143,10 @@ describe('grounded extraction and durable queue', () => {
   });
   it('accepts explicit user adoption of prior complete assistant proposal', async () => {
     const first = turn('Suggest a database'),
-      run = turn('Yes, use that', null, first.chatId),
-      memory = createMemoryStore(db),
+      memory = createMemoryStore(db);
+    // Capture the proposal's scope before using it as evidence for a later turn.
+    memory.enqueue(first);
+    const run = turn('Yes, use that', null, first.chatId),
       job = memory.enqueue(run)!;
     const result = await extractMemory(
       memory.extractionInput(job.id)!,

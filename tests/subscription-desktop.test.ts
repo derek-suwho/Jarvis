@@ -14,6 +14,7 @@ function desktop() {
     userAgentFallback: 'Chrome Electron/44 jarvis/1',
     whenReady: () => Promise.resolve(),
     quit: vi.fn(),
+    getPath: () => '/unused',
   });
   const windows: any[] = [];
   class Window extends EventEmitter {
@@ -38,6 +39,7 @@ function desktop() {
   const gemini = adapter('gemini');
   const grok = adapter('grok');
   const runtime = { shutdown: vi.fn() };
+  const tools = { registerIpc: vi.fn(), shutdown: vi.fn() };
   let coordinator: any;
   const modules: Record<string, any> = {
     electron: { app, BrowserWindow: Window, Menu: { setApplicationMenu: vi.fn(), buildFromTemplate: vi.fn() },
@@ -48,18 +50,19 @@ function desktop() {
     './gemini-cli.cjs': gemini,
     './grok-cli.cjs': grok,
     './subscription-stream.cjs': require('../electron/subscription-stream.cjs'),
-    './tools/index.cjs': { registerIpc: vi.fn() },
+    './tools/index.cjs': tools,
     './tasks/coordinator.cjs': { createTaskCoordinator: (options: any) => { coordinator = options; return runtime; } },
     './tasks/notifications.cjs': { createTaskNotifications: () => ({}) },
     './tasks/ipc.cjs': { registerTaskIpc: vi.fn() },
     './tasks/preview.cjs': { openPreviewAttempt: vi.fn() },
   };
+  modules[path.join(root, 'dist/backend/storage.cjs')] = { openDesktopStorage: vi.fn(() => ({ close: vi.fn() })) };
   vm.runInNewContext(readFileSync(path.join(root, 'electron/main.cjs'), 'utf8'), {
-    require: (id: string) => modules[id] ?? require(id),
+    require: (id: string) => modules[id] ?? require(['./checkpoints.cjs', './projects.cjs'].includes(id) ? '../electron/' + id.slice(2) : id),
     __dirname: path.join(root, 'electron'), process: { platform: 'darwin', env: {} },
     setTimeout, clearTimeout,
   });
-  return { handlers, app, gemini, grok, windows, runtime, getCoordinator: () => coordinator };
+  return { handlers, app, gemini, grok, tools, windows, runtime, getCoordinator: () => coordinator };
 }
 
 describe('subscription desktop integration', () => {
@@ -87,16 +90,22 @@ describe('subscription desktop integration', () => {
       expect(f[provider].openAttempt).toHaveBeenCalledExactlyOnceWith(input, emit);
     }
     let release!: () => void;
+    let releaseTools!: () => void;
     f.gemini.shutdown.mockReturnValue(new Promise<void>((resolve) => { release = resolve; }));
+    f.tools.shutdown.mockReturnValue(new Promise<void>((resolve) => { releaseTools = resolve; }));
     const event = { preventDefault: vi.fn() };
     f.app.emit('before-quit', event);
     f.app.emit('before-quit', event);
     expect(f.runtime.shutdown).toHaveBeenCalledOnce();
     expect(f.gemini.shutdown).toHaveBeenCalledOnce();
     expect(f.grok.shutdown).toHaveBeenCalledOnce();
+    expect(f.tools.shutdown).toHaveBeenCalledOnce();
     expect(event.preventDefault).toHaveBeenCalledTimes(2);
     expect(f.app.quit).not.toHaveBeenCalled();
     release();
+    for (let turn = 0; turn < 10; turn++) await Promise.resolve();
+    expect(f.app.quit).not.toHaveBeenCalled();
+    releaseTools();
     for (let turn = 0; turn < 10; turn++) await Promise.resolve();
     expect(f.app.quit).toHaveBeenCalledOnce();
     event.preventDefault.mockClear();

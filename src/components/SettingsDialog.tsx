@@ -45,7 +45,7 @@ const DESCRIPTIONS: Record<SettingsSection, string> = {
   Personalization: 'Instructions every new chat follows, in addition to project instructions.',
   Subscriptions: 'Sign in to connect your accounts, then choose your plan.',
   Tools: 'MCP servers and skills every model in Jarvis can use, ChatGPT and Claude alike.',
-  'Data controls': 'Everything is stored on this device only.',
+  'Data controls': 'Saved chats and shared memory are stored on this device. Messages, attachments, and relevant conversation or memory context are sent to the provider you use. Provider data policies and account usage limits apply.',
   'Keyboard shortcuts': 'Move around Jarvis without leaving the keyboard.',
 };
 
@@ -76,6 +76,7 @@ function SubscriptionsPanel({
   gemini,
   grok,
 }: Pick<Props, 'subscriptions' | 'onChange' | 'chatgpt' | 'claude' | 'gemini' | 'grok'>) {
+  const [installError, setInstallError] = useState('');
   const count = [chatgpt, claude, gemini, grok].filter((account) => account.state.phase === 'connected').length;
   return (
     <>
@@ -135,7 +136,10 @@ function SubscriptionsPanel({
                     account={extraAccount}
                     installLabel={`Set up ${p.name}`}
                     signOutNotice={p.id === 'google' ? 'Also signs out Antigravity CLI on this Mac' : undefined}
-                    onInstall={() => openExternal(p.id === 'google' ? 'https://antigravity.google/docs/install/' : 'https://docs.x.ai/build/overview')}
+                    onInstall={() => {
+                      setInstallError('');
+                      return openExternal(p.id === 'google' ? 'https://antigravity.google/docs/install/' : 'https://docs.x.ai/build/overview', setInstallError);
+                    }}
                   />}
                 </div>
               )}
@@ -143,6 +147,7 @@ function SubscriptionsPanel({
           );
         })}
       </ul>
+      {installError && <p className="task-error" role="alert">{installError}</p>}
       <footer className="dialog-footnote">
         <span className="mono">
           {count} account{count === 1 ? '' : 's'} connected
@@ -180,7 +185,7 @@ export function SettingsDialog(props: Props) {
   useDialog(dialogRef, onClose);
 
   return (
-    <div className="dialog-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="dialog-backdrop" onMouseDown={(e) => !e.defaultPrevented && e.button === 0 && e.target === e.currentTarget && onClose()}>
       <div className="dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title" tabIndex={-1} ref={dialogRef}>
         <nav className="dialog-nav" aria-label="Settings sections">
           <h2 id="settings-title">Settings</h2>

@@ -5,6 +5,7 @@ export type TaskState = 'queued' | 'running' | 'interrupting' | 'stopping' | 'co
 export type QueueEntry = { id: string; message: Message; sequence: number; state: 'queued' | 'applying' | 'applied' | 'cancelled' };
 export interface TaskRequest {
   requestId: string;
+  project?: { id: string; name: string };
   target: TaskTarget;
   title: string;
   history: Message[];
@@ -19,6 +20,8 @@ export interface TaskRequest {
   retryOf?: string;
 }
 export interface TaskSnapshot {
+  /** Scope captured at submission; independent of the chat’s current project. */
+  project?: { id: string; name: string };
   id: string;
   requestId: string;
   target: TaskTarget;
@@ -46,7 +49,7 @@ export interface TasksBridge {
   stop(taskId: string): Promise<TaskResult>;
   snapshot(): Promise<TaskSnapshot[]>;
   ack(input: { taskId: string; revision: number }): Promise<void>;
-  forgetTarget(target: TaskTarget): Promise<void>;
+  forgetTarget(target: TaskTarget, preserveHistory?: boolean): Promise<void>;
   detach(taskIds: string[]): Promise<void>;
   markRead(taskId: string): Promise<void>;
   setVisibleTargets(targets: TaskTarget[]): Promise<void>;

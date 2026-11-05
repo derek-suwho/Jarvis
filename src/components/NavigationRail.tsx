@@ -24,12 +24,16 @@ export function NavigationRail(p: Props) {
   const [helpOpen, setHelpOpen] = useState(false);
   const [logoutOpen, setLogoutOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+  const logoutPending = useRef(false);
+  const menuGeneration = useRef(0);
   const [error, setError] = useState('');
   const [position, setPosition] = useState({ top: 0, left: 0 });
+  const openingFromEnd = useRef(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const modifier = isMac() ? '⌘' : 'Ctrl';
   const close = (restore = true) => {
+    menuGeneration.current += 1;
     setOpen(false);
     setHelpOpen(false);
     setLogoutOpen(false);
@@ -57,7 +61,10 @@ export function NavigationRail(p: Props) {
   }, [open, helpOpen, logoutOpen, error, p.logoutAccounts.length]);
 
   useLayoutEffect(() => {
-    if (open) menuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus();
+    if (!open) return;
+    const items = menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)');
+    (openingFromEnd.current ? items?.[items.length - 1] : items?.[0])?.focus();
+    openingFromEnd.current = false;
   }, [open]);
 
   useLayoutEffect(() => {
@@ -73,7 +80,7 @@ export function NavigationRail(p: Props) {
       if (!menuRef.current?.contains(event.target as Node) && !triggerRef.current?.contains(event.target as Node)) close(false);
     };
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing || event.keyCode === 229) return;
       event.preventDefault();
       close();
     };
@@ -109,11 +116,13 @@ export function NavigationRail(p: Props) {
           aria-controls={open ? 'profile-menu' : undefined}
           onClick={() => {
             if (open) close();
-            else { setError(''); setOpen(true); }
+            else { openingFromEnd.current = false; setError(''); setOpen(true); }
           }}
           onKeyDown={(event) => {
+            if (event.defaultPrevented || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
             if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
               event.preventDefault();
+              openingFromEnd.current = event.key === 'ArrowUp';
               setOpen(true);
             }
           }}
@@ -128,7 +137,10 @@ export function NavigationRail(p: Props) {
           ref={menuRef}
           style={position}
           onKeyDown={(event) => {
-            const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')];
+            if (event.defaultPrevented || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+            const activeMenu = document.activeElement?.closest('[role="menu"]') ?? event.currentTarget;
+            const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')]
+              .filter((item) => item.closest('[role="menu"]') === activeMenu);
             const current = items.indexOf(document.activeElement as HTMLButtonElement);
             if (event.key === 'ArrowDown') items[(current + 1) % items.length]?.focus();
             else if (event.key === 'ArrowUp') items[(current - 1 + items.length) % items.length]?.focus();
@@ -141,10 +153,10 @@ export function NavigationRail(p: Props) {
               setLogoutOpen(true);
               setHelpOpen(false);
             }
-            else if (event.key === 'ArrowLeft' && helpOpen) {
+            else if ((event.key === 'ArrowLeft' || event.key === 'Escape') && helpOpen) {
               setHelpOpen(false);
               menuRef.current?.querySelector<HTMLButtonElement>('[data-help]')?.focus();
-            } else if (event.key === 'ArrowLeft' && logoutOpen) {
+            } else if ((event.key === 'ArrowLeft' || event.key === 'Escape') && logoutOpen) {
               setLogoutOpen(false);
               menuRef.current?.querySelector<HTMLButtonElement>('[data-logout]')?.focus();
             } else if (event.key === 'Escape') close();
@@ -170,11 +182,18 @@ export function NavigationRail(p: Props) {
             <button className="profile-menu-item" role="menuitem" data-logout aria-haspopup="menu" aria-expanded={logoutOpen} disabled={loggingOut} onClick={() => { setLogoutOpen((value) => !value); setHelpOpen(false); }}><LogOutIcon /><span>Log out</span><ChevronRightIcon /></button>
             {logoutOpen && <div className="profile-help-menu" role="menu" aria-label="Log out">
               {p.logoutAccounts.map((account, index) => <button key={account.id} autoFocus={index === 0} className="profile-menu-item" role="menuitem" disabled={loggingOut} onClick={async () => {
+                if (logoutPending.current) return;
+                logoutPending.current = true;
+                const generation = menuGeneration.current;
                 setLoggingOut(true);
                 setError('');
-                try { await account.logout(); close(); }
-                catch { setError(`Could not log out of ${account.label}. Try again in Settings.`); }
-                finally { setLoggingOut(false); }
+                try {
+                  await account.logout();
+                  if (generation === menuGeneration.current) close();
+                } catch {
+                  if (generation === menuGeneration.current) setError(`Could not log out of ${account.label}. Try again in Settings.`);
+                }
+                finally { logoutPending.current = false; setLoggingOut(false); }
               }}><span>{loggingOut ? 'Logging out…' : account.label}{account.note && <small>{account.note}</small>}</span></button>)}
             </div>}
           </>}

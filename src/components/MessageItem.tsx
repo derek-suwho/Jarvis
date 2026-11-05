@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { Feedback, Message, ToolUse } from '../lib/chats';
 import { fileExtension, formatBytes } from '../lib/attachments';
 import { Markdown } from './Markdown';
@@ -21,7 +21,7 @@ interface Props {
   /** Regenerate is offered on the latest reply only, as in ChatGPT and Claude. */
   isLast: boolean;
   busy: boolean;
-  onEdit?: (id: string, text: string) => void;
+  onEdit?: (id: string, text: string) => void | boolean | Promise<void | boolean>;
   onRegenerate?: (id: string) => void;
   onFeedback?: (id: string, f: Feedback | undefined) => void;
 }
@@ -88,18 +88,22 @@ function ActionButton({
   title,
   onClick,
   active,
+  buttonRef,
   children,
 }: {
   title: string;
   onClick: () => void;
   active?: boolean;
+  buttonRef?: React.RefObject<HTMLButtonElement>;
   children: React.ReactNode;
 }) {
   return (
     <button
+      ref={buttonRef}
       className={`icon-btn msg-action${active ? ' pressed' : ''}`}
       title={title}
       aria-label={title}
+      aria-pressed={active}
       onClick={onClick}
     >
       {children}
@@ -108,11 +112,32 @@ function ActionButton({
 }
 
 export function MessageItem({ message: m, streaming, isLast, busy, onEdit, onRegenerate, onFeedback }: Props) {
-  const [copied, copy] = useCopy();
+  const editErrorId = useId();
+  const editWarningId = `${editErrorId}-warning`;
+  const [copied, copy, copyError] = useCopy();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(m.content);
   const [speaking, setSpeaking] = useState(false);
+  const [editError, setEditError] = useState('');
+  const [editPending, setEditPending] = useState(false);
+  const savingEdit = useRef<object | null>(null);
+  useEffect(() => () => { savingEdit.current = null; }, []);
   const editRef = useRef<HTMLTextAreaElement>(null);
+  const editButtonRef = useRef<HTMLButtonElement>(null);
+  const restoreEditFocus = useRef(false);
+  const copyButtonRef = useRef<HTMLButtonElement>(null);
+  const closeEdit = () => {
+    savingEdit.current = null;
+    setEditPending(false);
+    restoreEditFocus.current = true;
+    setEditing(false);
+  };
+
+  useEffect(() => {
+    if (editing || !restoreEditFocus.current) return;
+    restoreEditFocus.current = false;
+    (editButtonRef.current ?? copyButtonRef.current)?.focus();
+  }, [editing]);
 
   useEffect(() => {
     const el = editRef.current;
@@ -139,34 +164,68 @@ export function MessageItem({ message: m, streaming, isLast, busy, onEdit, onReg
   if (m.role === 'user') {
     if (editing) {
       const save = () => {
+        if (busy || savingEdit.current) return;
         const t = draft.trim();
         if (!t) return;
-        setEditing(false);
-        if (t !== m.content) onEdit?.(m.id, t);
+        setEditError('');
+        const attempt = {};
+        const failed = () => {
+          if (savingEdit.current !== attempt) return;
+          savingEdit.current = null;
+          setEditPending(false);
+          setEditError('Could not send your edit. Your draft is still here. Try again.');
+          editRef.current?.focus();
+        };
+        try {
+          savingEdit.current = attempt;
+          const result = t !== m.content ? onEdit?.(m.id, t) : undefined;
+          if (result === false) { failed(); return; }
+          if (result && typeof result !== 'boolean') {
+            setEditPending(true);
+            return Promise.resolve(result).then((saved) => {
+              if (saved === false) failed();
+              else if (savingEdit.current === attempt) closeEdit();
+            }, failed);
+          }
+          closeEdit();
+        } catch { failed(); }
       };
       return (
         <div className="message user editing">
-          <div className="edit-box">
+          <div className="edit-box" aria-busy={editPending}>
             <textarea
               ref={editRef}
               autoFocus
               aria-label="Edit message"
+              aria-describedby={editError ? `${editWarningId} ${editErrorId}` : editWarningId}
+              readOnly={editPending}
               value={draft}
-              onChange={(e) => setDraft(e.target.value)}
+              onChange={(e) => {
+                setDraft(e.target.value);
+                setEditError('');
+              }}
               onKeyDown={(e) => {
-                if (e.key === 'Escape') setEditing(false);
-                if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                if (e.defaultPrevented || e.repeat || e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
+                if (e.key === 'Escape') {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  closeEdit();
+                  return;
+                }
+                if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
                   save();
                 }
               }}
             />
-            <p className="edit-warning">Sending an edit replaces the replies after this message.</p>
+            <p id={editWarningId} className="edit-warning">Sending an edit replaces the replies after this message.</p>
+            {editPending && <p role="status">Sending edit…</p>}
+            {editError && <p id={editErrorId} className="task-error" role="alert">{editError}</p>}
             <div className="edit-actions">
-              <button className="pill-btn" onClick={() => setEditing(false)}>
+              <button className="pill-btn" onClick={closeEdit}>
                 Cancel
               </button>
-              <button className="pill-btn primary" onClick={save} disabled={!draft.trim() || busy}>
+              <button className="pill-btn primary" onClick={save} disabled={!draft.trim() || busy || editPending}>
                 Send
               </button>
             </div>
@@ -179,13 +238,16 @@ export function MessageItem({ message: m, streaming, isLast, busy, onEdit, onReg
         <Attachments message={m} />
         {m.content && <div className="message-body">{m.content}</div>}
         {m.delivery === 'cancelled' && <p className="message-outcome">Not applied. Send again to include this instruction.</p>}
+        {copyError && <p className="task-error" role="alert">{copyError}</p>}
+        <span className="sr-only" role="status" aria-atomic={true}>{copied ? 'Copied to clipboard.' : ''}</span>
         <div className="msg-actions">
-          <ActionButton title={copied ? 'Copied' : 'Copy'} onClick={() => copy(m.content)}>
+          <ActionButton title={copied ? 'Copied' : 'Copy'} buttonRef={copyButtonRef} onClick={() => copy(m.content)}>
             {copied ? <CheckIcon /> : <CopyIcon />}
           </ActionButton>
           {onEdit && !busy && (
             <ActionButton
               title="Edit message"
+              buttonRef={editButtonRef}
               onClick={() => {
                 setDraft(m.content);
                 setEditing(true);
@@ -228,6 +290,8 @@ export function MessageItem({ message: m, streaming, isLast, busy, onEdit, onReg
       ) : (
         <p className="settings-hint">No text response was returned.</p>
       )}
+      {copyError && <p className="task-error" role="alert">{copyError}</p>}
+      <span className="sr-only" role="status" aria-atomic={true}>{copied ? 'Copied to clipboard.' : ''}</span>
       {!streaming && m.content && (
         <div className={`msg-actions${isLast ? ' visible' : ''}`}>
           <ActionButton title={copied ? 'Copied' : 'Copy'} onClick={() => copy(m.content)}>
