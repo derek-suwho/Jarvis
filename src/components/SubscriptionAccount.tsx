@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { SubscriptionAccount } from '../lib/useSubscriptionAccount';
 
 interface ConnectionProps {
@@ -13,6 +13,11 @@ export function SubscriptionConnection({ account, onInstall, installLabel = 'Ins
   const { state } = account;
   const [signingOut, setSigningOut] = useState(false);
   const [confirmSignOut, setConfirmSignOut] = useState(false);
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
   useEffect(() => {
     if (state.phase !== 'connected') setConfirmSignOut(false);
   }, [state.phase]);
@@ -29,6 +34,18 @@ export function SubscriptionConnection({ account, onInstall, installLabel = 'Ins
           title={signOutNotice}
           disabled={signingOut}
           onBlur={() => setConfirmSignOut(false)}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape' && confirmSignOut) {
+              event.preventDefault();
+              event.stopPropagation();
+              setConfirmSignOut(false);
+              return;
+            }
+            if ((event.key === 'Enter' || event.key === ' ')
+              && (event.repeat || event.nativeEvent.isComposing || event.keyCode === 229)) {
+              event.preventDefault();
+            }
+          }}
           onClick={async () => {
             if (signOutNotice && !confirmSignOut) {
               setConfirmSignOut(true);
@@ -37,7 +54,7 @@ export function SubscriptionConnection({ account, onInstall, installLabel = 'Ins
             setConfirmSignOut(false);
             setSigningOut(true);
             try { await account.signOut(); }
-            finally { setSigningOut(false); }
+            finally { if (mounted.current) setSigningOut(false); }
           }}
         >
           {signingOut ? 'Signing out…' : confirmSignOut ? 'Confirm sign out' : 'Sign out'}
@@ -64,10 +81,11 @@ export function SubscriptionStatusLine({ account }: { account: SubscriptionAccou
   if (state.phase === 'connected') {
     const identity = state.email || state.name || 'Connected';
     const text = state.plan ? `${identity} · ${state.plan}` : identity;
-    return <span className="status-dot connected"><span className="status-text" title={text}>{text}</span></span>;
+    return <span className="status-dot connected" role="status"><span className="status-text" title={text}>{text}</span></span>;
   }
-  if (state.phase === 'not-installed') return <span className="status-dot">Install to connect your account</span>;
-  if (state.phase === 'signed-out' && state.signingIn) return <span className="status-dot">Waiting for sign-in</span>;
-  if (state.phase === 'loading') return <span className="status-dot">Checking connection</span>;
-  return <span className="status-dot">Not connected</span>;
+  if (state.phase === 'unavailable') return <span className="status-dot" role="status">Desktop app required</span>;
+  if (state.phase === 'not-installed') return <span className="status-dot" role="status">Install to connect your account</span>;
+  if (state.phase === 'signed-out' && state.signingIn) return <span className="status-dot" role="status">Waiting for sign-in</span>;
+  if (state.phase === 'loading') return <span className="status-dot" role="status">Checking connection</span>;
+  return <span className="status-dot" role="status">Not connected</span>;
 }

@@ -35,6 +35,7 @@ export function createRunStore(db: Database) {
     db.prepare("INSERT INTO messages(id, chat_id, role, content, created_at, run_id) VALUES (?, ?, 'assistant', '', ?, ?)").run(assistantMessageId, input.chatId, now, id);
     db.prepare(`INSERT INTO runs(id, chat_id, request_id, user_message_id, assistant_message_id, provider_id, model_id, state, input_json, request_key, retry_of)
       VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?)`).run(id, input.chatId, input.requestId, userMessageId, assistantMessageId, input.model.providerId, input.model.modelId, JSON.stringify(input), key, retryOf);
+    db.prepare('UPDATE runs SET project_id = (SELECT project_id FROM chats WHERE id = ?) WHERE id = ?').run(input.chatId, id);
     db.prepare('UPDATE chats SET updated_at = ? WHERE id = ?').run(now, input.chatId);
     return record(row(id)!);
   }

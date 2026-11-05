@@ -15,17 +15,25 @@ export function useDialog(ref: RefObject<HTMLElement>, onClose: () => void) {
     if (!dialog) return;
     dialogs.push(dialog);
     const isTop = () => dialogs[dialogs.length - 1] === dialog;
-    const controls = () => [...dialog.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(
-      (element) => element.getClientRects().length > 0 && !element.closest('[hidden], [inert]'),
-    );
-    if (!dialog.contains(document.activeElement)) (controls()[0] ?? dialog).focus();
+    const controls = (container = dialog) => [...container.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(
+      (element) => element.tabIndex >= 0 && !element.matches(':disabled') && element.getClientRects().length > 0 && !element.closest('[hidden], [inert]') && getComputedStyle(element).visibility === 'visible',
+    ).sort((a, b) => {
+      // Browsers visit positive tabindex values first, retaining DOM order for ties.
+      const aOrder = a.tabIndex > 0 ? a.tabIndex : Infinity;
+      const bOrder = b.tabIndex > 0 ? b.tabIndex : Infinity;
+      return aOrder === bOrder ? 0 : aOrder - bOrder;
+    });
+    const active = document.activeElement;
+    const unavailable = active instanceof HTMLElement && (active.matches(':disabled') || active.getClientRects().length === 0 || active.closest('[hidden], [inert]') || getComputedStyle(active).visibility !== 'visible');
+    if (!dialog.contains(active) || unavailable) (controls()[0] ?? dialog).focus();
 
     const onKey = (event: KeyboardEvent) => {
-      if (!isTop() || event.defaultPrevented) return;
+      if (!isTop() || event.defaultPrevented || event.isComposing || event.keyCode === 229) return;
+      if (event.altKey || event.ctrlKey || event.metaKey || (event.key === 'Escape' && event.shiftKey)) return;
       if (event.key === 'Escape') {
         event.preventDefault();
         event.stopPropagation();
-        closeRef.current();
+        if (!event.repeat) closeRef.current();
       } else if (event.key === 'Tab') {
         const items = controls();
         const first = items[0];
@@ -33,10 +41,10 @@ export function useDialog(ref: RefObject<HTMLElement>, onClose: () => void) {
         if (!first) {
           event.preventDefault();
           dialog.focus();
-        } else if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog)) {
+        } else if (event.shiftKey && (document.activeElement === first || !items.includes(document.activeElement as HTMLElement))) {
           event.preventDefault();
           last.focus();
-        } else if (!event.shiftKey && (document.activeElement === last || !dialog.contains(document.activeElement))) {
+        } else if (!event.shiftKey && (document.activeElement === last || !items.includes(document.activeElement as HTMLElement))) {
           event.preventDefault();
           first.focus();
         }
@@ -48,10 +56,17 @@ export function useDialog(ref: RefObject<HTMLElement>, onClose: () => void) {
     document.addEventListener('keydown', onKey);
     document.addEventListener('focusin', onFocus);
     return () => {
+      const restoreFocus = isTop();
       document.removeEventListener('keydown', onKey);
       document.removeEventListener('focusin', onFocus);
       dialogs.splice(dialogs.indexOf(dialog), 1);
-      if (opener.current?.isConnected) opener.current.focus();
+      if (restoreFocus) {
+        const remaining = dialogs[dialogs.length - 1];
+        if ((!remaining || (opener.current && remaining.contains(opener.current))) && opener.current?.isConnected && opener.current.getClientRects().length > 0 && !opener.current.matches(':disabled') && !opener.current.closest('[hidden], [inert]') && getComputedStyle(opener.current).visibility === 'visible') opener.current.focus();
+        else {
+          if (remaining) (controls(remaining)[0] ?? remaining).focus();
+        }
+      }
     };
   }, [ref]);
 }

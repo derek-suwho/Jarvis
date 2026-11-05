@@ -30,11 +30,10 @@ export function composeInstructions(personal: string, project?: string): string 
 
 /** Includes original media on every turn that owns it, including replay after model switches. */
 export function buildReplyHistory(history: Message[], instructions?: string): ReplyMessage[] {
-  let pendingInstructions = instructions?.trim();
+  const scopedInstructions = instructions?.trim();
 
   const messages = history.filter((message) => !message.error &&
-    (!message.delivery || message.delivery === 'applied') &&
-    (!message.outcome || message.outcome === 'complete')).map((message) => {
+    (!message.delivery || message.delivery === 'applied')).slice(-200).map((message) => {
     let content = message.content;
     const media: ReplyMedia[] = [];
     let mediaBytes = 0;
@@ -61,19 +60,33 @@ export function buildReplyHistory(history: Message[], instructions?: string): Re
       throw new Error('A message can contain up to 10 files totaling 10 MB. Remove some attachments. Your draft is still here.');
     }
 
-    if (pendingInstructions && message.role === 'user') {
-      content = `User-provided instructions for this conversation:\n${pendingInstructions}\n\nUser message:\n${content}`;
-      pendingInstructions = undefined;
+    if (message.role === 'assistant' && message.outcome && message.outcome !== 'complete') {
+      content = `[Incomplete ${message.outcome} response]\n${content}`;
     }
 
     return { role: message.role, content, ...(media.length ? { media } : {}) };
   });
 
-  if (messages.length > 200 || messages.reduce((total, message) => total + message.content.length, 0) > 400_000) {
-    throw new Error('This conversation is too long to send. Start a new chat or remove some attached files. Your draft is still here.');
+  // Reapply instructions after each eviction so their owning turn can be trimmed.
+  let prepared: ReplyMessage[];
+  for (;;) {
+    let pendingInstructions = scopedInstructions;
+    prepared = messages.map((message) => {
+      if (!pendingInstructions || message.role !== 'user') return message;
+      const content = `User-provided instructions for this conversation:\n${pendingInstructions}\n\nUser message:\n${message.content}`;
+      pendingInstructions = undefined;
+      return { ...message, content };
+    });
+    const textTooLong = prepared.reduce((total, message) => total + message.content.length, 0) > 400_000;
+    const requestTooLarge = new TextEncoder().encode(JSON.stringify(prepared)).byteLength > MAX_REQUEST_BYTES;
+    if (!textTooLong && !requestTooLarge) break;
+    if (messages.length <= 1) {
+      if (requestTooLarge) {
+        throw new Error('This conversation is too large to send (20 MB limit). Start a new chat or remove some attached files. Your draft is still here.');
+      }
+      throw new Error('This conversation is too long to send. Start a new chat or remove some attached files. Your draft is still here.');
+    }
+    messages.shift();
   }
-  if (new TextEncoder().encode(JSON.stringify(messages)).byteLength > MAX_REQUEST_BYTES) {
-    throw new Error('This conversation is too large to send (20 MB limit). Start a new chat or remove some attached files. Your draft is still here.');
-  }
-  return messages;
+  return prepared;
 }

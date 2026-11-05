@@ -23,6 +23,7 @@ export type MemoryJob = {
   runId: string;
   chatId: string;
   userMessageId: string;
+  projectId: string | null;
   model: ModelRef;
   afterSequence: number;
   throughSequence: number;
@@ -69,6 +70,7 @@ type JobRow = {
   run_id: string;
   chat_id: string;
   user_message_id: string;
+  project_id: string | null;
   model_json: string;
   after_sequence: number;
   through_sequence: number;
@@ -82,6 +84,7 @@ const jobRecord = (r: JobRow): MemoryJob => ({
   runId: r.run_id,
   chatId: r.chat_id,
   userMessageId: r.user_message_id,
+  projectId: r.project_id,
   model: JSON.parse(r.model_json),
   afterSequence: r.after_sequence,
   throughSequence: r.through_sequence,
@@ -216,10 +219,17 @@ export function createMemoryStore(db: Database) {
     if (!job) return null;
     const snapshot = createChatStore(db).get(job.chatId);
     if (!snapshot) return null;
-    // Includes earlier complete assistant proposals for explicit adoption, never failed attempts.
+    // A later shipping turn can move the chat while this job awaits extraction.
+    snapshot.chat.projectId = job.projectId;
+    const chatJobs = jobs().filter((candidate) => candidate.chatId === job.chatId);
+    const scopedUsers = new Set(chatJobs
+      .filter((candidate) => candidate.projectId === job.projectId &&
+        candidate.throughSequence <= job.throughSequence)
+      .map((candidate) => candidate.userMessageId));
+    // Earlier proposals are evidence only within the same captured project scope.
     snapshot.messages = snapshot.messages.filter((m) =>
       m.role === 'user'
-        ? m.sourceSequence! <= job.throughSequence
+        ? scopedUsers.has(m.id) && m.sourceSequence! <= job.throughSequence
         : snapshot.runs.some(
             (r) =>
               r.assistantMessageId === m.id &&
@@ -227,6 +237,7 @@ export function createMemoryStore(db: Database) {
               snapshot.messages.some(
                 (u) =>
                   u.id === r.userMessageId &&
+                  scopedUsers.has(u.id) &&
                   u.sourceSequence! <= job.throughSequence,
               ),
           ),
@@ -235,7 +246,9 @@ export function createMemoryStore(db: Database) {
     return {
       snapshot,
       previousSummary:
-        summary && summary.throughSequence <= job.afterSequence
+        summary && summary.throughSequence <= job.afterSequence &&
+        !chatJobs.some((candidate) => candidate.throughSequence <= summary.throughSequence &&
+          candidate.projectId !== job.projectId)
           ? summary.text
           : null,
       afterSequence: job.afterSequence,
@@ -338,7 +351,7 @@ export function createMemoryStore(db: Database) {
           ).epoch;
           const id = randomUUID();
           db.prepare(
-            "INSERT INTO memory_jobs(id,run_id,chat_id,user_message_id,model_json,after_sequence,through_sequence,epoch,state) VALUES (?,?,?,?,?,?,?,?,'pending')",
+            "INSERT INTO memory_jobs(id,run_id,chat_id,user_message_id,model_json,after_sequence,through_sequence,epoch,project_id,state) VALUES (?,?,?,?,?,?,?,?,?,'pending')",
           ).run(
             id,
             saved.id,
@@ -348,6 +361,7 @@ export function createMemoryStore(db: Database) {
             after,
             through,
             clock,
+            createChatStore(db).get(saved.chatId)!.chat.projectId,
           );
           return getJob(id);
         })
@@ -519,16 +533,21 @@ export function createMemoryStore(db: Database) {
         candidate: JSON.parse(r.candidate_json),
       }));
     },
-    searchIndex(text: string): MemoryRecord[] {
-      const tokens = text.match(/[\p{L}\p{N}_]+/gu)?.slice(0, 24) ?? [];
+    searchIndex(text: string, filter?: { scope?: MemoryScope; status?: MemoryRecord['status'] }): MemoryRecord[] {
+      // Match the compatibility normalization used by shipping project resolution.
+      const tokens = text.normalize('NFKC').match(/[\p{L}\p{N}_]+/gu)?.slice(0, 24) ?? [];
       if (!tokens.length) return [];
       const query = tokens.map((t) => '"' + t + '"').join(' OR ');
       return (
         db
           .prepare(
-            'SELECT m.* FROM memory_fts f JOIN memory_records m ON m.id=f.id WHERE memory_fts MATCH ? ORDER BY rank LIMIT 100',
+            'SELECT m.* FROM memory_fts f JOIN memory_records m ON m.id=f.id WHERE memory_fts MATCH ?' +
+              (filter?.scope ? ' AND m.scope_key=?' : '') +
+              (filter?.status ? ' AND m.status=?' : '') +
+              ' ORDER BY rank LIMIT 100',
           )
-          .all(query) as Row[]
+          .all(query, ...(filter?.scope ? [scopeKey(filter.scope)] : []),
+            ...(filter?.status ? [filter.status] : [])) as Row[]
       ).map(record);
     },
     rebuildIndex(): void {
@@ -566,8 +585,8 @@ export function createMemoryStore(db: Database) {
         )) {
           const relevant =
             job.chatId === query.chatId ||
-            snapshot.chat.projectId === query.projectId ||
-            named.has(snapshot.chat.projectId!) ||
+            job.projectId === query.projectId ||
+            named.has(job.projectId!) ||
             terms.some((t) =>
               message.content.toLocaleLowerCase().includes(t),
             ) ||
@@ -577,7 +596,7 @@ export function createMemoryStore(db: Database) {
           if (relevant && !result.some((r) => r.message.id === message.id))
             result.push({
               message,
-              projectId: snapshot.chat.projectId,
+              projectId: job.projectId,
               jobId: job.id,
             });
         }

@@ -49,7 +49,37 @@ const migrations: Migration[] = [{ version: 1, up(db) {
       imported_at TEXT NOT NULL
     );
   `);
-} }, memoryMigration];
+} }, memoryMigration, { version: 3, up(db) {
+  db.exec(`CREATE TABLE renderer_checkpoint (
+    id INTEGER PRIMARY KEY CHECK(id = 1),
+    chats_json TEXT NOT NULL
+  )`);
+} }, { version: 4, up(db) {
+  db.exec(`ALTER TABLE memory_jobs ADD COLUMN project_id TEXT;
+    UPDATE memory_jobs SET project_id = (SELECT project_id FROM chats WHERE chats.id = memory_jobs.chat_id)`);
+} }, { version: 5, up(db) {
+  // Rebuild only the derived index; authoritative facts and provenance stay intact.
+  // Porter handles English inflections while unicode61 retains Unicode tokenization.
+  db.exec(`DROP TABLE memory_fts;
+    CREATE VIRTUAL TABLE memory_fts USING fts5(
+      id UNINDEXED, subject, key, value, keywords, tokenize='porter unicode61'
+    );
+    INSERT INTO memory_fts(id,subject,key,value,keywords)
+      SELECT id,subject,key,value,keywords_json FROM memory_records WHERE status='active'`);
+} }, { version: 6, up(db) {
+  // Completed legacy turns have captured job scope; other legacy turns can
+  // only be attributed to their chat's current project.
+  db.exec(`ALTER TABLE runs ADD COLUMN project_id TEXT;
+    UPDATE runs SET project_id = CASE
+      WHEN EXISTS (SELECT 1 FROM memory_jobs WHERE run_id = runs.id)
+        THEN (SELECT project_id FROM memory_jobs WHERE run_id = runs.id LIMIT 1)
+      ELSE (SELECT project_id FROM chats WHERE chats.id = runs.chat_id) END`);
+} }, { version: 7, up(db) {
+  db.exec(`CREATE TABLE renderer_checkpoint_media (
+    media_key TEXT PRIMARY KEY,
+    payload_json TEXT NOT NULL
+  )`);
+} }];
 
 /** Each migration and its ledger write commit together; failed versions remain retryable. */
 export function migrate(db: Database, versions: readonly Migration[] = migrations): void {

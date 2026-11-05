@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { openExternal } from '../lib/desktop';
 import type { ClaudeAccount } from '../lib/useClaude';
 
@@ -13,11 +13,7 @@ export function ClaudeConnection({ account }: { account: ClaudeAccount }) {
     case 'loading':
       return <span className="connect-note">Checking…</span>;
     case 'not-installed':
-      return (
-        <button className="add-btn" onClick={() => openExternal(INSTALL_URL)}>
-          Install Claude Code
-        </button>
-      );
+      return <ClaudeInstall />;
     case 'connected':
       return <ClaudeSignOut account={account} />;
     case 'signed-out':
@@ -36,26 +32,62 @@ export function ClaudeConnection({ account }: { account: ClaudeAccount }) {
   }
 }
 
+function ClaudeInstall() {
+  const [error, setError] = useState('');
+  return (
+    <div className="connect-actions">
+      <button className="add-btn" onClick={() => {
+        setError('');
+        return openExternal(INSTALL_URL, setError);
+      }}>
+        Install Claude Code
+      </button>
+      {error && <span className="connect-error status-text" role="alert">{error}</span>}
+    </div>
+  );
+}
+
 /**
  * Jarvis has no Claude login of its own: it uses the Claude Code login already on this Mac,
  * so signing out here signs out Claude Code everywhere (including the terminal). Two clicks to confirm.
  */
 function ClaudeSignOut({ account }: { account: ClaudeAccount }) {
   const [armed, setArmed] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
   return (
     <div className="connect-actions">
       {armed && <span className="connect-note">Also signs out Terminal</span>}
       <button
         className="text-btn danger account-action"
+        disabled={signingOut}
         title="Signs out Claude Code on this Mac, including the claude command in Terminal"
         onBlur={() => setArmed(false)}
-        onClick={() => {
+        onKeyDown={(event) => {
+          if (event.key === 'Escape' && armed) {
+            event.preventDefault();
+            event.stopPropagation();
+            setArmed(false);
+            return;
+          }
+          if ((event.key === 'Enter' || event.key === ' ')
+            && (event.repeat || event.nativeEvent.isComposing || event.keyCode === 229)) {
+            event.preventDefault();
+          }
+        }}
+        onClick={async () => {
           if (!armed) return setArmed(true);
           setArmed(false);
-          void account.signOut();
+          setSigningOut(true);
+          try { await account.signOut(); }
+          finally { if (mounted.current) setSigningOut(false); }
         }}
       >
-        {armed ? 'Confirm sign out' : 'Sign out'}
+        {signingOut ? 'Signing out…' : armed ? 'Confirm sign out' : 'Sign out'}
       </button>
     </div>
   );
@@ -73,15 +105,20 @@ export function ClaudeStatusLine({ account }: { account: ClaudeAccount }) {
     return (
       <span
         className="status-dot connected"
+        role="status"
         title="Jarvis uses the Claude Code login already on this Mac and never sees your credentials."
       >
         <span className="status-text">{text}</span>
       </span>
     );
   }
-  if (state.phase === 'not-installed') return <span className="status-dot">Claude Code not found</span>;
+  if (state.phase === 'not-installed') return <span className="status-dot" role="status">Claude Code not found</span>;
   if (state.phase === 'signed-out' && state.error) {
-    return <span className="connect-error status-text" title={state.error}>{state.error}</span>;
+    return <span className="connect-error status-text" role="alert" title={state.error}>{state.error}</span>;
   }
-  return <span className="status-dot">Not connected</span>;
+  const message = state.phase === 'loading' ? 'Checking connection…'
+    : state.phase === 'unavailable' ? 'Desktop app required'
+    : state.phase === 'signed-out' && state.waiting ? 'Waiting for Terminal sign-in…'
+    : 'Not connected';
+  return <span className="status-dot" role="status">{message}</span>;
 }

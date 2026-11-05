@@ -112,6 +112,7 @@ export function validateSchedule(draft: { title: string; prompt: string; cadence
   if (draft.prompt.length > PROMPT_MAX) return `Instructions must be under ${PROMPT_MAX} characters.`;
   const c = draft.cadence;
   if (c.kind === 'once' && !(Number.isFinite(c.at) && c.at > now)) return 'Pick a time in the future.';
+  if (c.kind === 'interval' && Number.isFinite(c.minutes) && c.minutes > 7 * 24 * 60) return 'Repeat interval must be 10080 minutes (7 days) or less.';
   if (c.kind === 'interval' && !(Number.isInteger(c.minutes) && c.minutes >= MIN_INTERVAL && c.minutes <= 7 * 24 * 60)) return `Repeat at least every ${MIN_INTERVAL} minutes.`;
   if ((c.kind === 'daily' || c.kind === 'weekly') && !validTime(c.time)) return 'Pick a time.';
   if (c.kind === 'weekly' && !(Number.isInteger(c.day) && c.day >= 0 && c.day <= 6)) return 'Pick a day.';
@@ -158,19 +159,26 @@ function isSchedule(v: unknown): v is Schedule {
     && typeof s.paused === 'boolean' && (s.nextRunAt === null || Number.isFinite(s.nextRunAt)) && isCadence(s.cadence);
 }
 
-export function loadSchedules(): Schedule[] {
+export function loadScheduleState(): { schedules: Schedule[]; failed: boolean } {
   try {
     const parsed: unknown = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]');
-    return Array.isArray(parsed) ? parsed.filter(isSchedule) : [];
+    if (!Array.isArray(parsed) || !parsed.every(isSchedule)) return { schedules: [], failed: true };
+    return { schedules: parsed, failed: false };
   } catch {
-    return [];
+    return { schedules: [], failed: true };
   }
 }
 
-export function saveSchedules(schedules: Schedule[]): void {
+export function loadSchedules(): Schedule[] {
+  return loadScheduleState().schedules;
+}
+
+export function saveSchedules(schedules: Schedule[]): boolean {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(schedules));
+    return true;
   } catch {
-    // Storage unavailable — keep in memory only.
+    // Keep the in-memory list, but let the runtime disclose the failed write.
+    return false;
   }
 }

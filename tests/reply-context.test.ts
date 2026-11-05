@@ -27,15 +27,66 @@ describe('buildReplyHistory', () => {
     expect(history).toEqual(original);
   });
 
-  it('rejects the whole oversized conversation before any transport starts', () => {
+  it('allows switching a long saved conversation by retaining the latest 200 messages and instructions', () => {
+    const history: Message[] = Array.from({ length: 203 }, (_, index) => ({
+      id: String(index), role: index % 2 === 0 ? 'user' : 'assistant', content: `Turn ${index}`,
+    }));
+    const original = structuredClone(history);
+    const result = buildReplyHistory(history, 'Keep project decisions');
+    expect(result).toHaveLength(200);
+    expect(result[0]).toEqual({ role: 'assistant', content: 'Turn 3' });
+    expect(result[1].content).toContain('Keep project decisions');
+    expect(result[1].content).toContain('Turn 4');
+    expect(result.at(-1)).toEqual({ role: 'user', content: 'Turn 202' });
+    expect(result.filter((message) => message.content.includes('Keep project decisions'))).toHaveLength(1);
+    expect(history).toEqual(original);
+  });
+
+  it('trims accumulated text before switching while retaining current input and instructions', () => {
+    const history: Message[] = [
+      { id: 'old', role: 'user', content: 'x'.repeat(250_000) },
+      { id: 'reply', role: 'assistant', content: 'y'.repeat(150_000) },
+      { id: 'recent', role: 'user', content: 'Recent decision' },
+      { id: 'current', role: 'user', content: 'Continue', attachments: [textFile('notes.txt', 'Current notes')] },
+    ];
+    const original = structuredClone(history);
+    const result = buildReplyHistory(history, 'Preserve decisions');
+    expect(result).toHaveLength(3);
+    expect(result[0]).toEqual({ role: 'assistant', content: 'y'.repeat(150_000) });
+    expect(result[1].content).toContain('Preserve decisions');
+    expect(result[1].content).toContain('Recent decision');
+    expect(result[2].content).toContain('Continue');
+    expect(result[2].content).toContain('Current notes');
+    expect(result.filter((message) => message.content.includes('Preserve decisions'))).toHaveLength(1);
+    expect(history).toEqual(original);
+  });
+
+  it('trims aggregate media before switching while preserving current attachments and instructions', () => {
+    const data = Buffer.from('%PDF-1.4\n' + ' '.repeat(8 * 1024 * 1024) + '\n%%EOF').toString('base64');
+    const attachment = { id: 'pdf', name: 'report.pdf', type: 'application/pdf', size: 8 * 1024 * 1024, data };
+    const history: Message[] = [
+      { id: 'old', role: 'user', content: 'Old report', attachments: [attachment] },
+      { id: 'reply', role: 'assistant', content: 'Previous summary' },
+      { id: 'current', role: 'user', content: 'Compare current report', attachments: [attachment] },
+    ];
+    const original = structuredClone(history);
+    const result = buildReplyHistory(history, 'Cite the report');
+    expect(result).toHaveLength(2);
+    expect(result[0]).toEqual({ role: 'assistant', content: 'Previous summary' });
+    expect(result[1].content).toContain('Cite the report');
+    expect(result[1].content).toContain('Compare current report');
+    expect(result[1].media).toEqual([{ name: attachment.name, type: attachment.type, data }]);
+    expect(history).toEqual(original);
+  }, 20_000);
+
+  it('rejects oversized current input before any transport starts', () => {
     expect(() => buildReplyHistory([{ id: '1', role: 'user', content: 'x'.repeat(400001) }])).toThrow(/too long/i);
     const data = Buffer.from('%PDF-1.4\n' + ' '.repeat(8 * 1024 * 1024) + '\n%%EOF').toString('base64');
-    const history: Message[] = Array.from({ length: 2 }, (_, i) => ({
-      id: String(i), role: 'user', content: 'Analyze',
-      attachments: [{ id: String(i), name: 'report.pdf', type: 'application/pdf', size: 8 * 1024 * 1024, data }],
-    }));
-    expect(() => buildReplyHistory(history)).toThrow(/too large|20 MB/i);
-  });
+    const attachment = { id: 'pdf', name: 'report.pdf', type: 'application/pdf', size: 8 * 1024 * 1024, data };
+    expect(() => buildReplyHistory([{
+      id: 'current', role: 'user', content: 'Analyze', attachments: [attachment, attachment],
+    }])).toThrow(/10 MB/i);
+  }, 20_000);
 
   it('preserves conversation order and omits failed responses', () => {
     const history: Message[] = [

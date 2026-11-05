@@ -1,3 +1,5 @@
+import { useChatCheckpoint } from './lib/useChatCheckpoint';
+import { usePanelFocusRecovery } from './lib/usePanelFocusRecovery';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { ChatGPTPlanNote, ChatGPTWelcome } from './components/ChatGPTAccount';
 import { ChatMenu } from './components/ChatMenu';
@@ -19,10 +21,10 @@ import {
   chatToMarkdown,
   createChat,
   loadChats,
+  reconcileChatCheckpoint,
   newId,
   titleFrom,
   renameChat,
-  saveChats,
   subscribeToChatStorageErrors,
   togglePin,
   truncateFrom,
@@ -30,7 +32,8 @@ import {
   updateMessage,
 } from './lib/chats';
 import type { DesktopCommand } from './lib/desktop';
-import { fileSlug, isDesktop, isMac, saveTextFile } from './lib/desktop';
+import { handleDesktopShortcut } from './lib/desktopShortcuts';
+import { fileSlug, isDesktop, isMac, exportTextFile } from './lib/desktop';
 import type { ModelSettings } from './lib/models';
 import {
   AUTO_MODEL_ID,
@@ -57,6 +60,7 @@ import { useClaude } from './lib/useClaude';
 import { useSubscriptionAccount } from './lib/useSubscriptionAccount';
 import type { LiveReply } from './lib/providerClient';
 import { getTaskClient } from './lib/tasks';
+import { executeProjectDeletion, planProjectDeletion } from './lib/projectDeletion';
 import { applyTaskSnapshot, chatTarget, mergeTaskMessages, recoverInterruptedMessages } from './lib/taskProjection';
 import type { TaskRequest, TaskResult, TaskSnapshot, TaskTarget } from './shared/tasks';
 import { isActiveTask } from './shared/tasks';
@@ -64,7 +68,7 @@ import { TaskQueue } from './components/TaskQueue';
 import { taskStateLabel } from './components/TasksPanel';
 import { ScheduledView } from './components/ScheduledView';
 import type { Schedule } from './lib/schedules';
-import { createSchedule, dueSchedules, editSchedule, loadSchedules, markRan, saveSchedules, setPaused } from './lib/schedules';
+import { createSchedule, dueSchedules, editSchedule, loadScheduleState, markRan, saveSchedules, setPaused } from './lib/schedules';
 import { buildReplyHistory, composeInstructions } from './lib/replyContext';
 import { clearAllDrafts, clearDraft } from './lib/drafts';
 import './components/Shell.css';
@@ -126,7 +130,13 @@ export function App() {
   const [taskClient] = useState(getTaskClient);
   const tasks = useSyncExternalStore(taskClient.subscribe, taskClient.getSnapshot, taskClient.getSnapshot);
   const [tasksReady, setTasksReady] = useState(false);
-  const [schedules, setSchedules] = useState<Schedule[]>(loadSchedules);
+  const [checkpointPaused, setCheckpointPaused] = useState(false);
+  const checkpointPause = useRef(false);
+  const [deletingProject, setDeletingProject] = useState(false);
+  const [initialScheduleState] = useState(loadScheduleState);
+  const [schedules, setSchedules] = useState<Schedule[]>(initialScheduleState.schedules);
+  const [scheduleLoadFailed, setScheduleLoadFailed] = useState(initialScheduleState.failed);
+  const [schedulePersistenceFailed, setSchedulePersistenceFailed] = useState(false);
   const [scheduledOpen, setScheduledOpen] = useState(false);
   const [peek, setPeek] = useState(false);
   const peekTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -164,36 +174,18 @@ export function App() {
     return () => { mounted = false; };
   }, [taskClient]);
   useEffect(() => {
-    if (!tasksReady) return;
+    if (!tasksReady || checkpointPaused) return;
     const visibleTasks = tasks.filter((task) => !ignoredTargets.current.has(targetKey(task.target)));
     setChats((current) => visibleTasks.reduce(applyTaskSnapshot, current));
     setTabs((current) => visibleTasks.reduce((next, task) => task.target.kind === 'sidechat'
       ? updateSideChat(next, task.target.id, (side) => ({ ...side, messages: mergeTaskMessages(side.messages, task) })) : next, current));
-  }, [tasks, tasksReady]);
+  }, [tasks, tasksReady, checkpointPaused]);
 
-  const persistence = useRef<{ timer?: ReturnType<typeof setTimeout>; chats: Chat[]; tasks: TaskSnapshot[]; signature: string }>({ chats, tasks, signature: '' });
-  persistence.current.chats = chats;
-  persistence.current.tasks = tasks;
-  useEffect(() => {
-    if (!tasksReady) return;
-    const state = persistence.current;
-    const signature = JSON.stringify(chats.map((chat) => [chat.id, chat.title, chat.projectId, chat.pinned, chat.archived,
-      chat.messages.map((message) => [message.id, message.role === 'user' ? message.content : '', message.delivery, message.outcome, message.feedback])]));
-    const immediate = signature !== state.signature || !tasks.some(isActiveTask);
-    state.signature = signature;
-    const flush = () => {
-      state.timer = undefined;
-      const savedChats = state.chats;
-      const savedTasks = state.tasks.filter((task) => !task.target.ephemeral && task.messages.length > 0 &&
-        task.messages.every((message) => savedChats.find((chat) => chat.id === task.target.id)?.messages.some((saved) => saved.id === message.id && (saved.taskRevision ?? 0) >= task.revision)));
-      void saveChats(savedChats).then(() => Promise.all(savedTasks.map((task) => taskClient.bridge.ack({ taskId: task.id, revision: task.revision })))).catch(() => {});
-    };
-    if (immediate) { clearTimeout(state.timer); flush(); }
-    else if (!state.timer) state.timer = setTimeout(flush, 250);
-  }, [chats, tasks, tasksReady, taskClient]);
-  useEffect(() => () => { clearTimeout(persistence.current.timer); }, []);
+  const persistence = useChatCheckpoint(chats, tasks, tasksReady, checkpointPaused, taskClient, checkpointPause);
   useEffect(() => saveProjects(projects), [projects]);
-  useEffect(() => saveSchedules(schedules), [schedules]);
+  useEffect(() => {
+    if (!scheduleLoadFailed) setSchedulePersistenceFailed(!saveSchedules(schedules));
+  }, [schedules, scheduleLoadFailed]);
   useEffect(() => savePreferences(prefs), [prefs]);
   useEffect(() => saveSubscriptions(subscriptions), [subscriptions]);
   useResolvedTheme(prefs.theme);
@@ -203,6 +195,7 @@ export function App() {
 
   const activeChat = chats.find((c) => c.id === activeId) ?? null;
   const panelOpen = tabs.length > 0 && panelVisible;
+  const panelFocusTarget = usePanelFocusRecovery(panelOpen);
   const activeProject = projects.find((p) => p.id === (activeChat ? activeChat.projectId : activeProjectId)) ?? null;
   const activeTask = taskFor('chat', activeId);
   const pending = !!activeTask;
@@ -329,8 +322,11 @@ export function App() {
 
   const makeRequest = (history: Message[], input: Message, target: TaskTarget, title: string, projectInstructions?: string, creation?: Chat, retryOf?: string): TaskRequest => {
     const provider = live([...history, input], target.id, projectInstructions ?? '');
+    const projectId = target.kind === 'chat' ? (creation ?? chats.find(chat => chat.id === target.id))?.projectId : undefined;
+    const project = projects.find(item => item.id === projectId);
     return {
       requestId: newId(), target, title, history, input,
+      ...(project ? { project: { id: project.id, name: project.name } } : {}),
       instructions: composeInstructions(prefs.instructions, projectInstructions),
       modelLabel: label(), provider: provider?.provider ?? 'preview', model: provider?.slug ?? model.modelId,
       ...(provider?.provider === 'claude' ? { mode: provider.mode, reasoning: provider.reasoning } : {}),
@@ -392,17 +388,18 @@ export function App() {
     await taskClient.bridge.detach(ids);
   };
   const editMessage = async (messageId: string, text: string) => {
-    if (!activeChat || activeTask) return;
+    if (!activeChat || activeTask) return false;
     const original = activeChat.messages.find((message) => message.id === messageId);
-    if (!original) return;
+    if (!original) return false;
     const before = activeChat.messages.slice(0, activeChat.messages.findIndex((message) => message.id === messageId));
     const input = userMessage(text, original.attachments ?? []);
     const error = validateSend(before, activeProject?.instructions, text, original.attachments ?? []);
-    if (error) { setNotice({ text: error }); return; }
+    if (error) { setNotice({ text: error }); return false; }
     await detachChatTasks(activeChat.id);
     const result = await taskClient.start(makeRequest(before, input, chatTarget(activeChat), activeChat.title, activeProject?.instructions));
     if (result.ok) setChats((current) => applyTaskSnapshot(truncateFrom(current, activeChat.id, messageId), result.task));
     else reportResult(result);
+    return result.ok;
   };
 
   const validateSend = (
@@ -462,7 +459,7 @@ export function App() {
 
   const exportChat = (id: string) => {
     const chat = chats.find((c) => c.id === id);
-    if (chat) void saveTextFile(`${fileSlug(chat.title)}.md`, chatToMarkdown(chat), 'text/markdown');
+    if (chat) void exportTextFile(`${fileSlug(chat.title)}.md`, chatToMarkdown(chat), 'text/markdown', text => setNotice({ text }));
   };
 
   const chatActions = {
@@ -481,10 +478,60 @@ export function App() {
     },
   };
 
-  const deleteProject = (id: string) => {
-    setProjects((ps) => ps.filter((p) => p.id !== id));
-    setChats((cs) => cs.map((c) => (c.projectId === id ? { ...c, projectId: undefined } : c)));
-    navigate(null);
+  const deleteProject = async (id: string) => {
+    if (deletingProject) return;
+    setDeletingProject(true);
+    const currentChats = persistence.current.chats;
+    const plan = planProjectDeletion(id, currentChats, taskClient.getSnapshot(), tabs);
+    try {
+      await executeProjectDeletion(id, currentChats, taskClient.getSnapshot(), {
+        pause: () => {
+          checkpointPause.current = true;
+          setCheckpointPaused(true);
+          persistence.current.chats = plan.chats;
+          persistence.current.tasks = [];
+          setChats(plan.chats);
+          const remainingTabs = plan.tabs ?? [];
+          tabs.filter(tab => !remainingTabs.some(kept => kept.id === tab.id)).forEach(tab => clearDraft(`side:${tab.id}`, false));
+          setTabs(remainingTabs);
+          if (!remainingTabs.some(tab => tab.id === activeTabId)) setActiveTabId(remainingTabs[0]?.id ?? null);
+          if (!remainingTabs.length) { setFullView(false); setPanelVisible(false); }
+        },
+        forget: (target) => {
+          ignoredTargets.current.add(targetKey(target));
+          return taskClient.forgetTarget(target, true);
+        },
+        projectDelete: async () => {
+          if (!isDesktop()) return;
+          if (!window.jarvis?.projects || !await window.jarvis.projects.delete(id)) {
+            throw new Error('Project deletion failed.');
+          }
+        },
+        reconcile: (run) => isDesktop() ? reconcileChatCheckpoint(run) : run(),
+        load: () => isDesktop() ? [...loadChats(), ...plan.chats.filter(chat => chat.temporary)] : plan.chats,
+        removeTabs: (ids) => {
+          ids.forEach(tabId => clearDraft(`side:${tabId}`, false));
+          setTabs(current => current.filter(tab => !ids.includes(tab.id)));
+          if (activeTabId && ids.includes(activeTabId)) {
+            setActiveTabId(null);
+            setFullView(false);
+            setPanelVisible(false);
+          }
+        },
+        publish: (restored) => {
+          currentChats.filter(chat => chat.projectId === id).forEach(chat => clearDraft(chat.id, !chat.temporary));
+          persistence.current.chats = restored;
+          persistence.current.signature = '';
+          setChats(restored);
+          setProjects((ps) => ps.filter((p) => p.id !== id));
+          navigate(null);
+          setCheckpointPaused(false);
+          setNotice({ text: 'Project and its saved history deleted' });
+        },
+      }, tabs);
+    } catch {
+      setNotice({ text: 'Could not finish project deletion. Conversation saving is paused. Retry deleting the project or reopen Jarvis.' });
+    } finally { setDeletingProject(false); }
   };
 
   const openTab = (tab: Tab, full: boolean) => {
@@ -494,11 +541,11 @@ export function App() {
     showPanel(true);
   };
 
-  const openSideChat = () => openTab(createSideChat(activeChat, activeProject?.instructions), false);
+  const openSideChat = () => openTab(createSideChat(activeChat, activeProject?.instructions, activeProject?.id), false);
 
   // Replace a new-tab page with a side chat, as its "Side chat" tool does.
   const convertToSideChat = (id: string) => {
-    const side = { ...createSideChat(activeChat, activeProject?.instructions), id };
+    const side = { ...createSideChat(activeChat, activeProject?.instructions, activeProject?.id), id };
     setTabs((ts) => ts.map((t) => (t.id === id ? side : t)));
   };
 
@@ -589,17 +636,12 @@ export function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (document.querySelector('[aria-modal="true"], [role="menu"]')) return;
-      if (!(e.metaKey || e.ctrlKey)) return;
       const s = shortcuts.current;
-      if (e.shiftKey && !e.altKey && e.code === 'KeyB') s.openTab(createBrowserTab(), false);
-      else if (e.shiftKey && !e.altKey && e.code === 'KeyF') s.openTab(createBrowserTab(), true);
-      else if (e.altKey && !e.shiftKey && e.code === 'KeyS') s.openSideChat();
-      else if (e.shiftKey && !e.altKey && e.code === 'KeyO') s.runCommand('new-chat');
-      else if (e.shiftKey && !e.altKey && e.code === 'KeyS') s.runCommand('toggle-sidebar');
-      else if (!e.shiftKey && !e.altKey && e.code === 'KeyK') s.runCommand('search');
-      else if (!e.shiftKey && !e.altKey && e.key === ',') s.runCommand('settings');
-      else return;
-      e.preventDefault();
+      handleDesktopShortcut(e, {
+        openBrowser: (fullView) => s.openTab(createBrowserTab(), fullView),
+        openSideChat: s.openSideChat,
+        runCommand: s.runCommand,
+      });
     };
     window.addEventListener('keydown', onKey);
     const off = window.jarvis?.onCommand((c) => shortcuts.current.runCommand(c));
@@ -650,7 +692,7 @@ export function App() {
       >
         <SidebarIcon />
       </button>
-      <button className="icon-btn" title={`New chat (${isMac() ? '⇧⌘O' : 'Ctrl ⇧ O'})`} aria-label="New chat" onClick={() => navigate(null)}>
+      <button ref={panelFocusTarget} className="icon-btn" title={`New chat (${isMac() ? '⇧⌘O' : 'Ctrl ⇧ O'})`} aria-label="New chat" onClick={() => navigate(null)}>
         <ComposeIcon />
       </button>
     </div>
@@ -742,7 +784,7 @@ export function App() {
   );
 
   return (
-    <div className={`app${sidebarOpen ? '' : ' sidebar-closed'}`}>
+    <div className={`app${sidebarOpen ? '' : ' sidebar-closed'}`} aria-busy={deletingProject} {...(deletingProject ? { inert: '' } : {})}>
       {/* Window title strip, like ChatGPT desktop: window buttons, then sidebar and new chat. */}
       <header className="titlebar drag-region">
         {leading}
@@ -791,6 +833,14 @@ export function App() {
         {scheduledOpen ? (
           <ScheduledView
             schedules={schedules}
+            loadFailed={scheduleLoadFailed}
+            onRetryLoad={() => {
+              const loaded = loadScheduleState();
+              if (!loaded.failed) setSchedules(loaded.schedules);
+              setScheduleLoadFailed(loaded.failed);
+            }}
+            persistenceFailed={schedulePersistenceFailed}
+            onRetrySave={() => setSchedulePersistenceFailed(!saveSchedules(schedules))}
             onCreate={(draft) => {
               const schedule = createSchedule(draft);
               setSchedules((ss) => [...ss, schedule]);
@@ -988,7 +1038,7 @@ export function App() {
             })();
           }}
           onExportAll={() =>
-            void saveTextFile(
+            void exportTextFile(
               'jarvis-chats.json',
               JSON.stringify(
                 chats.filter((c) => !c.temporary),
@@ -996,6 +1046,7 @@ export function App() {
                 2,
               ),
               'application/json',
+              text => setNotice({ text }),
             )
           }
           onClose={() => setSettings(null)}

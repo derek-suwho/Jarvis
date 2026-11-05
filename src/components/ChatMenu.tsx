@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { Chat } from '../lib/chats';
 import type { Project } from '../lib/projects';
@@ -23,15 +23,26 @@ export function ChatMenu({ chat, projects, variant = 'row', ...actions }: Props)
   const [open, setOpen] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
   const [position, setPosition] = useState({ top: 0, left: 0 });
+  const [error, setError] = useState('');
+  const errorId = useId();
+  const menuId = `${errorId}-menu`;
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const focusMove = useRef(false);
+  const openAtEnd = useRef(false);
 
   const close = (restore = true) => {
+    setError('');
     setOpen(false);
     setMoveOpen(false);
     if (restore) triggerRef.current?.focus();
   };
+
+  useEffect(() => {
+    setError('');
+    setOpen(false);
+    setMoveOpen(false);
+  }, [chat.id]);
 
   useLayoutEffect(() => {
     if (!open) return;
@@ -52,10 +63,13 @@ export function ChatMenu({ chat, projects, variant = 'row', ...actions }: Props)
       window.removeEventListener('resize', place);
       window.removeEventListener('scroll', place, true);
     };
-  }, [open, moveOpen, projects.length]);
+  }, [open, moveOpen, projects.length, error]);
 
   useLayoutEffect(() => {
-    if (open) menuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus();
+    if (!open) return;
+    const items = menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]');
+    items?.[openAtEnd.current ? items.length - 1 : 0]?.focus();
+    openAtEnd.current = false;
   }, [open]);
 
   useLayoutEffect(() => {
@@ -67,11 +81,23 @@ export function ChatMenu({ chat, projects, variant = 'row', ...actions }: Props)
 
   useEffect(() => {
     if (!open) return;
-    const onDown = (event: MouseEvent) => {
+    const onBlur = () => close(false);
+    window.addEventListener('blur', onBlur);
+    return () => window.removeEventListener('blur', onBlur);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (event: MouseEvent | TouchEvent) => {
+      if (event.defaultPrevented || ('button' in event && event.button !== 0)) return;
       if (!menuRef.current?.contains(event.target as Node) && !triggerRef.current?.contains(event.target as Node)) close(false);
     };
     document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
+    document.addEventListener('touchstart', onDown, { passive: true });
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('touchstart', onDown);
+    };
   }, [open]);
 
   const item = (icon: JSX.Element, label: string, action: () => void, danger = false, move = false) => (
@@ -80,10 +106,19 @@ export function ChatMenu({ chat, projects, variant = 'row', ...actions }: Props)
       className={`menu-option${danger ? ' danger' : ''}`}
       role="menuitem"
       data-move-option={move || undefined}
+      aria-describedby={error ? errorId : undefined}
       onClick={(event) => {
         event.stopPropagation();
-        close();
-        action();
+        setError('');
+        triggerRef.current?.focus();
+        try {
+          action();
+        } catch {
+          setError('Could not complete this action. Try again.');
+          event.currentTarget.focus();
+          return;
+        }
+        close(false);
       }}
     >
       <span className="menu-option-label">{icon}{label}</span>
@@ -99,10 +134,17 @@ export function ChatMenu({ chat, projects, variant = 'row', ...actions }: Props)
         aria-label={`Options for ${chat.title}`}
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
+        onBlur={(event) => {
+          const destination = event.relatedTarget as Node | null;
+          if (!menuRef.current?.contains(destination) && !triggerRef.current?.contains(destination)) close(false);
+        }}
         onClick={() => open ? close() : setOpen(true)}
         onKeyDown={(event) => {
+          if (event.defaultPrevented || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229 || event.ctrlKey || event.altKey || event.metaKey) return;
           if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
             event.preventDefault();
+            openAtEnd.current = event.key === 'ArrowUp';
             setOpen(true);
           }
         }}
@@ -110,27 +152,50 @@ export function ChatMenu({ chat, projects, variant = 'row', ...actions }: Props)
       {open && createPortal(
         <div
           ref={menuRef}
+          id={menuId}
           className="menu chat-menu-list floating-chat-menu"
           role="menu"
           aria-label={`Options for ${chat.title}`}
           style={position}
+          onBlur={(event) => {
+            const destination = event.relatedTarget as Node | null;
+            if (!menuRef.current?.contains(destination) && !triggerRef.current?.contains(destination)) close(false);
+          }}
           onKeyDown={(event) => {
+            if ((event.key === 'Enter' || event.key === ' ') && (event.ctrlKey || event.altKey || event.metaKey || event.shiftKey)) {
+              event.preventDefault();
+              return;
+            }
+            if (event.defaultPrevented || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229 || event.ctrlKey || event.altKey || event.metaKey) return;
+            if (event.repeat && (event.key === 'Escape' || event.key === 'Enter' || event.key === ' ')) {
+              event.preventDefault();
+              event.stopPropagation();
+              return;
+            }
             const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
             const current = items.indexOf(document.activeElement as HTMLButtonElement);
             if (event.key === 'ArrowDown') items[(current + 1) % items.length]?.focus();
-            else if (event.key === 'ArrowUp') items[(current - 1 + items.length) % items.length]?.focus();
+            else if (event.key === 'ArrowUp') items[current < 0 ? items.length - 1 : (current - 1 + items.length) % items.length]?.focus();
             else if (event.key === 'Home') items[0]?.focus();
             else if (event.key === 'End') items[items.length - 1]?.focus();
             else if (event.key === 'ArrowRight' && (event.target as HTMLElement).closest('[data-move-toggle]')) {
-              focusMove.current = true;
-              setMoveOpen(true);
-            } else if (event.key === 'ArrowLeft' && moveOpen) {
+              if (moveOpen) menuRef.current?.querySelector<HTMLButtonElement>('[data-move-option]')?.focus();
+              else {
+                focusMove.current = true;
+                setMoveOpen(true);
+              }
+            } else if ((event.key === 'ArrowLeft' || event.key === 'Escape') && moveOpen) {
               setMoveOpen(false);
               menuRef.current?.querySelector<HTMLButtonElement>('[data-move-toggle]')?.focus();
             } else if (event.key === 'Escape') close();
             else if (event.key === 'Tab') {
               close();
               return;
+            } else if (event.key.length === 1 && event.key.trim() && !event.ctrlKey && !event.metaKey && !event.altKey) {
+              const ordered = [...items.slice(current + 1), ...items.slice(0, current + 1)];
+              const match = ordered.find(item => item.textContent?.trim().toLocaleLowerCase().startsWith(event.key.toLocaleLowerCase()));
+              if (!match) return;
+              match.focus();
             } else return;
             event.preventDefault();
             event.stopPropagation();
@@ -153,6 +218,7 @@ export function ChatMenu({ chat, projects, variant = 'row', ...actions }: Props)
           <div className="menu-divider" role="separator" />
           {item(<ArchiveIcon />, 'Archive chat', () => actions.onArchive(chat.id))}
           {item(<TrashIcon />, 'Delete chat', () => actions.onDelete(chat.id), true)}
+          {error && <p id={errorId} className="task-error" role="alert">{error}</p>}
         </div>,
         document.body,
       )}

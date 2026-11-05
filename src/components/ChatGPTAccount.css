@@ -62,7 +62,7 @@
 }
 
 .welcome-card {
-  display: flex;
+  display: none;
   flex-direction: column;
   align-items: center;
   gap: 10px;
@@ -71,9 +71,19 @@
   border: 1px solid var(--border);
   border-radius: 16px;
   background: #2f2f2f;
+  color: var(--text);
   box-shadow: var(--shadow);
   text-align: center;
   animation: pop 0.25s var(--ease);
+}
+
+.welcome-card[open] {
+  display: flex;
+}
+
+.welcome-card::backdrop {
+  background: var(--backdrop);
+  backdrop-filter: blur(4px);
 }
 
 .welcome-card h3 {

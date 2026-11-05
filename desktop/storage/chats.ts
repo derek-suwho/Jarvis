@@ -4,6 +4,7 @@ import type { Role } from '../../src/shared/contracts';
 import type { Database } from './database';
 import { reconcileMemory } from './memory';
 import { createRunStore } from './runs';
+import { createCheckpointStore } from './checkpoints';
 
 type ChatRow = { id: string; project_id: string | null; title: string; updated_at: string };
 type MessageRow = { sequence: number; id: string; chat_id: string; role: Role; content: string; created_at: string; run_id: string | null };
@@ -30,6 +31,11 @@ export function createChatStore(db: Database) {
     },
     delete(id: string): void {
       db.transaction(() => {
+        // The renderer archive has no foreign key to normalized chats.
+        // Purge both representations in the same deletion transaction.
+        const checkpoints = createCheckpointStore(db);
+        const archive = checkpoints.load();
+        if (archive !== null) checkpoints.save(archive.filter(chat => chat.id !== id));
         db.prepare('DELETE FROM chats WHERE id = ?').run(id);
         reconcileMemory(db);
       }).immediate();

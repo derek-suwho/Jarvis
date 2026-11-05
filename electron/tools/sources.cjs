@@ -229,6 +229,8 @@ const SECRET_VALUE = /^(sk|ctx7sk|ghp|gho|glpat|xox[abp]|pat)[-_]|^[A-Za-z0-9_-]
 function serverTarget(s) {
   if (s.transport !== 'stdio') {
     const url = new URL(s.url);
+    if (url.username) url.username = '•••';
+    if (url.password) url.password = '•••';
     for (const [k] of url.searchParams) if (SECRET_FLAG.test(k)) url.searchParams.set(k, '•••');
     return url.toString();
   }

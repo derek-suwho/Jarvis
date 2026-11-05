@@ -7,7 +7,8 @@
     "dev": "vite",
     "desktop:dev": "node scripts/dev-desktop.mjs",
     "desktop": "npm run build && electron .",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && node --max-old-space-size=1024 node_modules/vite/bin/vite.js build && npm run build:backend",
+    "build:backend": "node scripts/build-backend.mjs",
     "preview": "vite preview",
     "test": "vitest run",
     "test:ui": "node scripts/check-navigation.mjs && node scripts/check-chat-flows.mjs && node scripts/check-stream-flows.mjs",
@@ -18,15 +19,18 @@
     "ralph:check": "ralph preflight",
     "ralph:dry-run": "ralph run --dry-run",
     "ralph:run": "ralph run --autonomous",
-    "ralph:verify": "npm test && npm run build && npm run typecheck:backend"
+    "release:manifest": "node scripts/release-manifest.mjs",
+    "release:licenses": "node scripts/license-report.mjs package-lock.json config/allowed-licenses.json",
+    "ralph:verify": "npm test && npm run build && npm run typecheck:backend",
+    "package:mac:unsigned": "npm run build && electron-builder --config config/electron-builder.cjs --mac --publish never"
   },
   "dependencies": {
     "@fontsource-variable/geist": "5.2.8",
     "@fontsource-variable/geist-mono": "5.2.7",
     "@modelcontextprotocol/sdk": "1.32.1",
     "better-sqlite3": "13.0.3",
-    "katex": "0.16.22",
-    "mermaid": "11.6.0",
+    "katex": "0.19.1",
+    "mermaid": "12.2.0",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "smol-toml": "1.9.1"
@@ -39,12 +43,13 @@
     "@types/react": "18.3.23",
     "@types/react-dom": "18.3.7",
     "@vitejs/plugin-react": "4.5.2",
-    "electron": "44.6.0",
-    "puppeteer": "^25.15.0",
+    "electron": "44.10.0",
+    "electron-builder": "26.18.0",
+    "puppeteer": "25.15.0",
     "tsx": "4.23.15",
     "typescript": "5.8.3",
-    "vite": "6.3.5",
-    "vitest": "3.2.4"
+    "vite": "6.4.5",
+    "vitest": "3.2.7"
   },
   "main": "electron/main.cjs",
   "allowScripts": {

@@ -1,6 +1,4 @@
-import { Fragment, useMemo } from 'react';
-import katex from 'katex';
-import 'katex/dist/katex.min.css';
+import { Fragment, Suspense, lazy, useMemo } from 'react';
 import type { Block, Inline } from '../lib/markdown';
 import { parseMarkdown } from '../lib/markdown';
 import { artifactKind } from '../lib/artifacts';
@@ -8,14 +6,23 @@ import { Artifact } from './Artifact';
 import { useCopy } from './useCopy';
 import { CheckIcon, CopyIcon } from './Icons';
 
-/** KaTeX output; with `trust` off it escapes input and allows no links, scripts or styles from the TeX. */
-function TeX({ tex, display }: { tex: string; display: boolean }) {
-  const html = useMemo(
-    () => katex.renderToString(tex, { displayMode: display, throwOnError: false, output: 'htmlAndMathml', trust: false }),
-    [tex, display],
-  );
+function UnavailableTeX({ tex, display }: { tex: string; display: boolean }) {
   const Tag = display ? 'div' : 'span';
-  return <Tag className={display ? 'md-math-display' : 'md-math'} dangerouslySetInnerHTML={{ __html: html }} />;
+  return <Tag className={display ? 'md-math-display' : 'md-math'}>
+    <span className="sr-only">Math rendering unavailable; showing source.</span>
+    {tex}
+  </Tag>;
+}
+
+const LazyTeX = lazy(() => import('./TeX').catch(() => ({ default: UnavailableTeX })));
+
+function TeX({ tex, display }: { tex: string; display: boolean }) {
+  const Tag = display ? 'div' : 'span';
+  return (
+    <Suspense fallback={<Tag className={display ? 'md-math-display' : 'md-math'}>{tex}</Tag>}>
+      <LazyTeX tex={tex} display={display} />
+    </Suspense>
+  );
 }
 
 function Inlines({ items }: { items: Inline[] }) {
@@ -54,7 +61,7 @@ function Inlines({ items }: { items: Inline[] }) {
 }
 
 function CodeBlock({ lang, text }: { lang: string; text: string }) {
-  const [copied, copy] = useCopy();
+  const [copied, copy, copyError] = useCopy();
   return (
     <div className="md-code">
       <div className="md-code-bar">
@@ -64,6 +71,8 @@ function CodeBlock({ lang, text }: { lang: string; text: string }) {
           {copied ? 'Copied' : 'Copy'}
         </button>
       </div>
+      {copyError && <p className="task-error" role="alert">{copyError}</p>}
+      <span className="sr-only" role="status" aria-atomic={true}>{copied ? 'Copied to clipboard.' : ''}</span>
       <pre>
         <code>{text}</code>
       </pre>

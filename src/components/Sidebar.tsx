@@ -48,6 +48,7 @@ function RenameInput({ initial, onDone }: { initial: string; onDone: (v: string 
       onClick={(e) => e.stopPropagation()}
       onBlur={() => finish(value)}
       onKeyDown={(e) => {
+        if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
         if (e.key === 'Enter') finish(value);
         if (e.key === 'Escape') finish(null);
       }}
@@ -82,7 +83,7 @@ export function Sidebar(p: Props) {
 
   return (
     <aside ref={asideRef} id="chat-history" className="sidebar" aria-label="Chat history" style={width ? ({ '--sidebar-width': `${width}px` } as CSSProperties) : undefined}>
-      <ResizeHandle label="Resize sidebar" edge="right" measure={() => asideRef.current?.offsetWidth ?? 256} onResize={setWidth} onReset={() => setWidth(null)} />
+      <ResizeHandle minWidth={200} maxWidth={480} label="Resize sidebar" edge="right" measure={() => asideRef.current?.offsetWidth ?? 256} onResize={setWidth} onReset={() => setWidth(null)} />
       <div className="sidebar-header drag-region">
         <span className="brand">
           Jarvis

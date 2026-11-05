@@ -19,6 +19,13 @@ function subscriptionProvider(provider) {
 // The only desktop capabilities the renderer gets.
 contextBridge.exposeInMainWorld('jarvis', {
   isDesktop: true,
+  projects: {
+    delete: (id) => ipcRenderer.invoke('projects:delete', id),
+  },
+  checkpoints: {
+    load: () => ipcRenderer.invoke('checkpoints:load'),
+    save: (chats) => ipcRenderer.invoke('checkpoints:save', JSON.stringify(chats)),
+  },
   platform: process.platform,
   gemini: subscriptionProvider('gemini'),
   grok: subscriptionProvider('grok'),
@@ -30,7 +37,7 @@ contextBridge.exposeInMainWorld('jarvis', {
     stop: (id) => ipcRenderer.invoke('tasks:stop', id),
     snapshot: () => ipcRenderer.invoke('tasks:snapshot'),
     ack: (input) => ipcRenderer.invoke('tasks:ack', input),
-    forgetTarget: (target) => ipcRenderer.invoke('tasks:forgetTarget', target),
+    forgetTarget: (target, preserveHistory = false) => ipcRenderer.invoke('tasks:forgetTarget', target, preserveHistory),
     detach: (ids) => ipcRenderer.invoke('tasks:detach', ids),
     markRead: (id) => ipcRenderer.invoke('tasks:markRead', id),
     setVisibleTargets: (targets) => ipcRenderer.invoke('tasks:setVisibleTargets', targets),

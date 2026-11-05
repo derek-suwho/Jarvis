@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { ModelSettings } from '../lib/models';
 import {
@@ -21,7 +21,9 @@ interface Props {
 
 export function ModelPicker({ value, onChange }: Props) {
   const [open, setOpen] = useState(false);
+  const dialogId = useId();
   const [query, setQuery] = useState('');
+  const [error, setError] = useState<string | null>(null);
   const [position, setPosition] = useState({ left: 0, top: 0, maxHeight: 440 });
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -33,31 +35,43 @@ export function ModelPicker({ value, onChange }: Props) {
   const close = (restore = true) => {
     setOpen(false);
     setQuery('');
+    setError(null);
     if (restore) triggerRef.current?.focus();
   };
 
   useEffect(() => {
     if (!open) return;
     searchRef.current?.focus();
-    const onPointer = (event: MouseEvent) => {
+    const onPointer = (event: MouseEvent | TouchEvent) => {
+      if (event.defaultPrevented || ('button' in event && event.button !== 0)) return;
       const node = event.target as Node;
       if (!panelRef.current?.contains(node) && !triggerRef.current?.contains(node)) close(false);
     };
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
+      if (event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
+      if (event.key === 'Escape' && !event.defaultPrevented && !event.isComposing && event.keyCode !== 229) {
         event.preventDefault();
         event.stopPropagation();
         close();
       }
     };
     const onResize = () => close(false);
+    const onScroll = (event: Event) => {
+      if (!panelRef.current?.contains(event.target as Node)) close(false);
+    };
     document.addEventListener('mousedown', onPointer);
+    document.addEventListener('touchstart', onPointer, { passive: true });
     document.addEventListener('keydown', onKey);
     window.addEventListener('resize', onResize);
+    window.addEventListener('blur', onResize);
+    window.addEventListener('scroll', onScroll, true);
     return () => {
       document.removeEventListener('mousedown', onPointer);
+      document.removeEventListener('touchstart', onPointer);
       document.removeEventListener('keydown', onKey);
       window.removeEventListener('resize', onResize);
+      window.removeEventListener('blur', onResize);
+      window.removeEventListener('scroll', onScroll, true);
     };
   }, [open]);
 
@@ -77,9 +91,17 @@ export function ModelPicker({ value, onChange }: Props) {
     setOpen(true);
   };
 
+  const saveSettings = (settings: ModelSettings, dismiss = false) => {
+    setError(null);
+    try {
+      onChange(settings);
+      if (dismiss) close();
+    } catch {
+      setError('Could not save model settings. Try again.');
+    }
+  };
   const select = (modelId: string, reasoning = value.reasoning) => {
-    onChange({ ...value, modelId, reasoning });
-    close();
+    saveSettings({ ...value, modelId, reasoning }, true);
   };
 
   return (
@@ -88,9 +110,13 @@ export function ModelPicker({ value, onChange }: Props) {
         ref={triggerRef}
         className={`model-trigger${open ? ' open' : ''}`}
         onClick={toggle}
+        onBlur={(event) => {
+          if (open && !panelRef.current?.contains(event.relatedTarget as Node)) close(false);
+        }}
         aria-label={`Choose model, current ${label.name}`}
         aria-haspopup="dialog"
         aria-expanded={open}
+        aria-controls={open ? dialogId : undefined}
       >
         <span>{label.name}</span>
         {isClaudeModel(value.modelId) && (
@@ -102,6 +128,7 @@ export function ModelPicker({ value, onChange }: Props) {
         createPortal(
           <div
             ref={panelRef}
+            id={dialogId}
             className="model-popover"
             role="dialog"
             aria-label="Choose a model"
@@ -115,11 +142,20 @@ export function ModelPicker({ value, onChange }: Props) {
                 close(false);
             }}
             onKeyDown={(event) => {
-              if (!['ArrowDown', 'ArrowUp'].includes(event.key) || event.target instanceof HTMLSelectElement) return;
+              if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+              if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+              if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key) || event.target instanceof HTMLSelectElement) return;
               const options = [...panelRef.current!.querySelectorAll<HTMLButtonElement>('.model-choice')];
               if (!options.length) return;
-              event.preventDefault();
               const index = options.indexOf(document.activeElement as HTMLButtonElement);
+              if (event.key === 'Home' || event.key === 'End') {
+                // Preserve caret movement while editing the model search.
+                if (index < 0) return;
+                event.preventDefault();
+                options[event.key === 'Home' ? 0 : options.length - 1].focus();
+                return;
+              }
+              event.preventDefault();
               const next =
                 index < 0
                   ? event.key === 'ArrowDown'
@@ -175,7 +211,7 @@ export function ModelPicker({ value, onChange }: Props) {
               ))}
               {groups.length === 0 &&
                 (query.trim() ? (
-                  !showAuto && <p className="menu-empty">No models match “{query}”.</p>
+                  !showAuto && <p className="menu-empty" role="status">No models match “{query}”.</p>
                 ) : (
                   <p className="menu-empty">Add a subscription in Settings to see its models.</p>
                 ))}
@@ -187,7 +223,7 @@ export function ModelPicker({ value, onChange }: Props) {
                   <select
                     value={value.reasoning}
                     onChange={(event) =>
-                      onChange({ ...value, reasoning: event.target.value as ModelSettings['reasoning'] })
+                      saveSettings({ ...value, reasoning: event.target.value as ModelSettings['reasoning'] })
                     }
                   >
                     {REASONING_LEVELS.map((level) => (
@@ -200,7 +236,7 @@ export function ModelPicker({ value, onChange }: Props) {
                   <select
                     value={value.claudeMode}
                     onChange={(event) =>
-                      onChange({ ...value, claudeMode: event.target.value as ModelSettings['claudeMode'] })
+                      saveSettings({ ...value, claudeMode: event.target.value as ModelSettings['claudeMode'] })
                     }
                   >
                     {CLAUDE_MODES.map((mode) => (
@@ -212,6 +248,7 @@ export function ModelPicker({ value, onChange }: Props) {
                 </label>
               </div>
             )}
+            {error && <p className="task-error" role="alert">{error}</p>}
             <div className="model-footer">Availability depends on your connected plan.</div>
           </div>,
           document.body,

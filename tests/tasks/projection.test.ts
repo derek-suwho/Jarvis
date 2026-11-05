@@ -29,6 +29,27 @@ describe('task projections', () => {
     expect(applyTaskSnapshot([], task())).toEqual([]);
     expect(applyTaskSnapshot([], { ...task(), creation: chat() })[0].messages).toHaveLength(2);
   });
+  it('recovers saved output unless the active task owns the same chat generation', () => {
+    const saved: Chat = { ...chat(), taskGeneration: 'restored', messages: [
+      { id: 'partial', role: 'assistant', content: 'Saved partial', taskId: 'task', attemptId: 'old',
+        tools: [{ id: 'tool', server: 'local', tool: 'search', status: 'running' }] },
+      { id: 'queued', role: 'user', content: 'Saved instruction', taskId: 'task', delivery: 'applying' },
+    ] };
+    const original = structuredClone(saved);
+    const live = { ...task(), target: { ...task().target, generation: 'restored' } };
+    expect(recoverInterruptedMessages([saved], [live])).toEqual([saved]);
+    for (const unrelated of [task(),
+      { ...live, target: { ...live.target, id: 'other-chat' } },
+      { ...live, target: { ...live.target, kind: 'sidechat' as const } },
+    ]) {
+      const recovered = recoverInterruptedMessages([saved], [unrelated]);
+      expect(recovered[0].messages[0]).toMatchObject({ content: 'Saved partial', outcome: 'interrupted',
+        tools: [{ status: 'error' }] });
+      expect(recovered[0].messages[1]).toMatchObject({ content: 'Saved instruction', delivery: 'cancelled' });
+      expect(recoverInterruptedMessages(recovered, [unrelated])).toEqual(recovered);
+    }
+    expect(saved).toEqual(original);
+  });
   it('marks abandoned output and queued instructions interrupted without changing live tasks', () => {
     const saved = { ...chat(), messages: [
       { id: 'a', role: 'assistant' as const, content: 'Partial', taskId: 'lost', attemptId: 'attempt' },

@@ -19,6 +19,7 @@ export function createMemoryQueue({
     worker: Promise<void> | null = null,
     active: AbortController | null = null;
   let activeChatId: string | null = null;
+  let activeProjectId: string | null = null;
   const cancelledChats = new Set<string>();
   const listeners = new Set<() => void>();
   const notify = () => {
@@ -26,12 +27,15 @@ export function createMemoryQueue({
   };
   function start() {
     if (stopped || worker) return;
+    const first = memory.claimNext([...cancelledChats]);
+    if (!first) return;
     worker = (async () => {
+      let job: typeof first | null = first;
       while (!stopped) {
-        const job = memory.claimNext([...cancelledChats]);
         if (!job) break;
         active = new AbortController();
         activeChatId = job.chatId;
+        activeProjectId = job.projectId;
         try {
           const input = memory.extractionInput(job.id);
           if (input) {
@@ -51,8 +55,10 @@ export function createMemoryQueue({
         } finally {
           active = null;
           activeChatId = null;
+          activeProjectId = null;
           notify();
         }
+        job = stopped ? null : memory.claimNext([...cancelledChats]);
       }
     })().finally(() => {
       worker = null;
@@ -109,6 +115,24 @@ export function createMemoryQueue({
       await new Promise<void>((resolve) => {
         const settled = () => {
           if (activeChatId !== chatId) {
+            listeners.delete(settled);
+            resolve();
+          }
+        };
+        listeners.add(settled);
+        settled();
+      });
+    },
+    resumeChat(chatId: string): void {
+      cancelledChats.delete(chatId);
+      start();
+    },
+    async cancelProject(projectId: string): Promise<void> {
+      if (activeProjectId !== projectId) return;
+      active?.abort(new Error('Project extraction aborted'));
+      await new Promise<void>((resolve) => {
+        const settled = () => {
+          if (activeProjectId !== projectId) {
             listeners.delete(settled);
             resolve();
           }

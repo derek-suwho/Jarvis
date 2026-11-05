@@ -4,7 +4,9 @@ import { watch } from 'node:fs';
 import electron from 'electron';
 import { createServer } from 'vite';
 import { createDesktopRunner } from './desktop-runner.mjs';
+import { buildBackend } from './build-backend.mjs';
 
+await buildBackend();
 const server = await createServer();
 await server.listen();
 const url = server.resolvedUrls.local[0];
